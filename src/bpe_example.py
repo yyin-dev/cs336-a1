@@ -35,6 +35,10 @@ def merge(freq_table):
         pair_freq = pair_freqs.get(pair)
         return (pair_freq, pair)
 
+    if len(pair_freqs) == 0:
+        # Cannot merge any more
+        return None, None
+
     selected_pair = max(pair_freqs, key=comp)
     new_vocab = selected_pair[0] + selected_pair[1]
     print(f"Selected pair: {selected_pair}")
@@ -55,13 +59,17 @@ def merge(freq_table):
     return new_vocab, updated_freq_table
 
 
-for i in range(6):
+for i in range(100):
     print(f"=== Iteration {i} ===")
     print(f"Before merge")
     print(f"freq_table: {freq_table}")
 
     new_vocab, freq_table = merge(freq_table)
-    vocabs.append(new_vocab)
+    if new_vocab is None:
+        print("Stop")
+        break
+    else:
+        vocabs.append(new_vocab)
 
     print("After merge")
     print(f"freq_table: {freq_table}")
