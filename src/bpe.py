@@ -1,9 +1,10 @@
 import os
 import regex as re
 import collections
+from multiprocessing import Process, Queue
 from .pretokenization_example import find_chunk_boundaries
 
-
+NUM_PROCESS = 8
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
 
@@ -21,6 +22,67 @@ def get_subword_pair_freq(
             subword_pair_freq[(first, second)] += freq
 
     return subword_pair_freq
+
+
+def pretokenize_chunk(input_path, start, end, special_tokens, queue):
+    escaped_special_tokens = list(map(re.escape, special_tokens))
+    special_tokens_regex = "|".join(escaped_special_tokens)
+
+    pretoken_freq: dict[tuple, int] = collections.defaultdict(int)
+    with open(input_path, "rb") as f:
+        f.seek(start)
+        chunk = f.read(end - start).decode("utf-8", errors="ignore")
+
+    # Split on special tokens, and pretokensize results separately.
+    # For example, [Doc 1]<ike [Doc 1]<|endoftext|>[Doc2], you should split
+    # on the special token <|endoftext|>, and pre-tokenize [Doc 1] and
+    # [Doc 2] separately, so that no merging can occur across the document
+    # boundary.
+    for part in re.split(special_tokens_regex, chunk):
+        for pretoken in re.finditer(PAT, part):
+            pretoken = pretoken.group()
+            pretoken_bytes_singleton: bytes = pretoken.encode("utf-8")
+            individual_bytes: list[bytes] = [
+                pretoken_bytes_singleton[i : i + 1]
+                for i in range(len(pretoken_bytes_singleton))
+            ]
+
+            pretoken_freq[tuple(individual_bytes)] += 1
+
+    queue.put(pretoken_freq)
+
+
+def parallel_pretokenize(
+    input_path: str | os.PathLike, special_tokens: list[str]
+) -> dict[tuple, int]:
+    pretoken_freq: dict[tuple, int] = collections.defaultdict(int)
+    with open(input_path, "rb") as f:
+        chunk_boundaries = find_chunk_boundaries(
+            f, NUM_PROCESS, "<|endoftext|>".encode("utf-8")
+        )
+
+    queue = Queue()
+    processes = []
+    for start, end in zip(chunk_boundaries[:-1], chunk_boundaries[1:]):
+        process = Process(
+            target=pretokenize_chunk,
+            args=(input_path, start, end, special_tokens, queue),
+        )
+        processes.append(process)
+        process.start()
+
+    for process in processes:
+        # Must get() from queue before join(). O/w the queue fills up and blocks
+        # process from put(), and blocks everything
+        chunk_pretoken_freq = queue.get()
+
+        for pretoken, freq in chunk_pretoken_freq.items():
+            pretoken_freq[pretoken] += freq
+
+    for process in processes:
+        process.join()
+
+    return pretoken_freq
 
 
 def train_bpe(
@@ -50,28 +112,7 @@ def train_bpe(
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
     """
-    # TODO: Parallize pretokenization
-    escaped_special_tokens = list(map(re.escape, special_tokens))
-    special_tokens_regex = "|".join(escaped_special_tokens)
-    print(escaped_special_tokens)
-
-    pretoken_freq: dict[tuple, int] = collections.defaultdict(int)
-    with open(input_path, "r") as f:
-        # Split on special tokens, and pretokensize results separately.
-        # For example, [Doc 1]<ike [Doc 1]<|endoftext|>[Doc2], you should split
-        # on the special token <|endoftext|>, and pre-tokenize [Doc 1] and
-        # [Doc 2] separately, so that no merging can occur across the document
-        # boundary.
-        for part in re.split(special_tokens_regex, f.read()):
-            for pretoken in re.finditer(PAT, part):
-                pretoken = pretoken.group()
-                pretoken_bytes_singleton: bytes = pretoken.encode("utf-8")
-                individual_bytes: list[bytes] = [
-                    pretoken_bytes_singleton[i : i + 1]
-                    for i in range(len(pretoken_bytes_singleton))
-                ]
-
-                pretoken_freq[tuple(individual_bytes)] += 1
+    pretoken_freq: dict[tuple, int] = parallel_pretokenize(input_path, special_tokens)
 
     vocab: list[bytes] = list(map(int.to_bytes, list(range(0, 256))))
     vocab.extend(list(map(lambda s: s.encode("utf-8"), special_tokens)))
