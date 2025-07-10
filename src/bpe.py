@@ -8,27 +8,11 @@ NUM_PROCESS = 8
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
 
-def get_subword_pair_freq(
-    pretoken_freq: dict[tuple, int],
-) -> dict[tuple[bytes, bytes], int]:
-    """
-    Args:
-        pretoken_freq (dict[tuple, int]). The key is a tuple of bytes
-    """
-    subword_pair_freq: dict[tuple[bytes, bytes], int] = collections.defaultdict(int)
-
-    for pretoken_subwords, freq in pretoken_freq.items():
-        for first, second in zip(pretoken_subwords, pretoken_subwords[1:]):
-            subword_pair_freq[(first, second)] += freq
-
-    return subword_pair_freq
-
-
 def pretokenize_chunk(input_path, start, end, special_tokens, queue):
     escaped_special_tokens = list(map(re.escape, special_tokens))
     special_tokens_regex = "|".join(escaped_special_tokens)
 
-    pretoken_freq: dict[tuple, int] = collections.defaultdict(int)
+    pretoken_freq: dict[bytes, int] = collections.defaultdict(int)
     with open(input_path, "rb") as f:
         f.seek(start)
         chunk = f.read(end - start).decode("utf-8", errors="ignore")
@@ -41,21 +25,16 @@ def pretokenize_chunk(input_path, start, end, special_tokens, queue):
     for part in re.split(special_tokens_regex, chunk):
         for pretoken in re.finditer(PAT, part):
             pretoken = pretoken.group()
-            pretoken_bytes_singleton: bytes = pretoken.encode("utf-8")
-            individual_bytes: list[bytes] = [
-                pretoken_bytes_singleton[i : i + 1]
-                for i in range(len(pretoken_bytes_singleton))
-            ]
-
-            pretoken_freq[tuple(individual_bytes)] += 1
+            pretoken_bytes: bytes = pretoken.encode("utf-8")
+            pretoken_freq[pretoken_bytes] += 1
 
     queue.put(pretoken_freq)
 
 
 def parallel_pretokenize(
     input_path: str | os.PathLike, special_tokens: list[str]
-) -> dict[tuple, int]:
-    pretoken_freq: dict[tuple, int] = collections.defaultdict(int)
+) -> dict[bytes, int]:
+    pretoken_freq: dict[bytes, int] = collections.defaultdict(int)
     with open(input_path, "rb") as f:
         chunk_boundaries = find_chunk_boundaries(
             f, NUM_PROCESS, "<|endoftext|>".encode("utf-8")
@@ -112,44 +91,122 @@ def train_bpe(
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
     """
-    pretoken_freq: dict[tuple, int] = parallel_pretokenize(input_path, special_tokens)
+    pretoken_counts: dict[bytes, int] = parallel_pretokenize(input_path, special_tokens)
 
     vocab: list[bytes] = list(map(int.to_bytes, list(range(0, 256))))
     vocab.extend(list(map(lambda s: s.encode("utf-8"), special_tokens)))
     print(f"Init vocab size (including special tokens): {len(vocab)}")
 
+    pretoken_frequencies: dict[int, int] = {}
+    pretoken_subwords: dict[int, list[bytes]] = {}
+    pair_frequencies: dict[tuple[bytes, bytes], int] = collections.defaultdict(int)
+    pair_positions: dict[tuple[bytes, bytes], dict[int, set[int]]] = (
+        collections.defaultdict(lambda: collections.defaultdict(set))
+    )
+
+    pretoken_id = 0
+    for pretoken, count in pretoken_counts.items():
+        pretoken_frequencies[pretoken_id] = count
+        pretoken_subwords[pretoken_id] = list(map(int.to_bytes, list(pretoken)))
+        pretoken_id += 1
+
+    for pretoken_id, frequency in pretoken_frequencies.items():
+        subwords = pretoken_subwords[pretoken_id]
+
+        for position, pair in enumerate(zip(subwords[:-1], subwords[1:])):
+            pair_frequencies[pair] += frequency
+            pair_positions[pair][pretoken_id].add(position)
+
+    iter = 0
     merges: list[tuple[bytes, bytes]] = []
     while len(vocab) < vocab_size:
-        subword_pair_freq = get_subword_pair_freq(pretoken_freq)
-
-        # Stop if all pretokens have been merged
-        if len(subword_pair_freq) == 0:
+        if len(pair_frequencies) == 0 or max(pair_frequencies.values()) == 0:
             break
 
-        def comp_freq_then_pair(pair):
-            pair_freq = subword_pair_freq[pair]
+        # print(f"=== Iteration {iter} ===")
+
+        def comp(pair):
+            pair_freq = pair_frequencies.get(pair)
             return (pair_freq, pair)
 
-        selected_pair = max(subword_pair_freq, key=comp_freq_then_pair)
-        new_vocab = selected_pair[0] + selected_pair[1]
+        # print(f"Before merge")
+        # print(f"Pair frequencies: {pair_frequencies}")
+        # print(f"Pair positions: {pair_positions}")
 
-        merged_pretoken_freq: dict[tuple, int] = collections.defaultdict(int)
-        for pretoken_subwords, freq in pretoken_freq.items():
-            merged_pretoken_subwords: list[bytes] = [pretoken_subwords[0]]
-            for curr in pretoken_subwords[1:]:
-                prev = merged_pretoken_subwords[-1]
-                if (prev, curr) == selected_pair:
-                    merged_pretoken_subwords[-1] = new_vocab
-                else:
-                    merged_pretoken_subwords.append(curr)
+        selected_pair = max(pair_frequencies, key=comp)
+        new_vocab: bytes = selected_pair[0] + selected_pair[1]
+        # print(f"!!! Selected: {selected_pair}")
+        # print(f"Pair positions: {pair_positions[selected_pair]}")
 
-            merged_pretoken_freq[tuple(merged_pretoken_subwords)] = freq
+        for pretoken_id in pair_positions[selected_pair]:
+            positions = list(pair_positions[selected_pair][pretoken_id])
 
-        print(f"Merge: {selected_pair} -> {new_vocab}")
-        pretoken_freq = merged_pretoken_freq
+            # print(f"pretoken: {pretoken_id}, {pretoken_subwords[pretoken_id]}")
+            # print(f"positions: {positions}")
 
-        vocab.append(new_vocab)
+            frequency = pretoken_frequencies[pretoken_id]
+
+            for i in reversed(range(len(positions))):
+                position = positions[i]
+
+                old_subwords = pretoken_subwords[pretoken_id]
+                new_subwords = old_subwords.copy()
+
+                # print(f"position: {position}")
+
+                # prev pair
+                if position - 1 >= 0:
+                    old_prev_pair = (old_subwords[position - 1], old_subwords[position])
+                    # print(f"old prev pair: {old_prev_pair}")
+                    pair_frequencies[old_prev_pair] -= frequency
+
+                    pair_positions[old_prev_pair][pretoken_id].remove(position - 1)
+
+                    new_prev_pair = (old_subwords[position - 1], new_vocab)
+                    # print(f"new prev pair: {new_prev_pair}")
+                    pair_frequencies[new_prev_pair] += frequency
+                    pair_positions[new_prev_pair][pretoken_id].add(position - 1)
+
+                # next pair
+                if position + 2 < len(old_subwords):
+                    old_next_pair = (
+                        old_subwords[position + 1],
+                        old_subwords[position + 2],
+                    )
+                    # print(f"old next pair: {old_next_pair}")
+                    pair_frequencies[old_next_pair] -= frequency
+                    pair_positions[old_next_pair][pretoken_id].remove(position + 1)
+
+                    new_next_pair = (new_vocab, old_subwords[position + 2])
+                    # print(f"new next pair: {new_next_pair}")
+                    pair_frequencies[new_next_pair] += frequency
+                    pair_positions[new_next_pair][pretoken_id].add(position)
+
+                for pair in set(
+                    zip(old_subwords[position + 2 : -1], old_subwords[position + 3 :])
+                ):
+                    ps = list(pair_positions[pair][pretoken_id])
+                    for idx, p in enumerate(ps):
+                        if p >= position + 2:
+                            ps[idx] -= 1
+
+                    pair_positions[pair][pretoken_id] = set(ps)
+                    # print(f"adjusting: {pair}: {pair_positions[pair][pretoken_id]}")
+
+                new_subwords[position] = new_vocab
+                new_subwords.pop(position + 1)
+
+                for i, pos in enumerate(positions):
+                    if pos > position:
+                        positions[i] -= 1
+
+                pretoken_subwords[pretoken_id] = new_subwords
+
+        del pair_frequencies[selected_pair]
+        del pair_positions[selected_pair]
+
+        iter += 1
         merges.append(selected_pair)
+        vocab.append(new_vocab)
 
-    vocab_dict = dict(enumerate(vocab))
-    return (vocab_dict, merges)
+    return (dict(enumerate(vocab)), merges)
