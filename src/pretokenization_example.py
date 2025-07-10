@@ -51,7 +51,7 @@ def find_chunk_boundaries(
 
 ## Usage
 def run():
-    with open(..., "rb") as f:
+    with open("test.txt", "rb") as f:
         num_processes = 8
 
         boundaries = find_chunk_boundaries(
