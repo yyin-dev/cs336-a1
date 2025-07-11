@@ -100,4 +100,4 @@ def test_train_bpe_overlappings():
         special_tokens=["<|endoftext|>"],
     )
 
-    assert merges == [(b"o", b"o"), (b"oo", b"oo"), (b"o", b"oooo")]
+    assert merges == [(b"o", b"o"), (b"oo", b"oo"), (b"oooo", b"o")]

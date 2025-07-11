@@ -1,3 +1,7 @@
+"""
+BPE (Byte Pair Encoding) training.
+"""
+
 import os
 import regex as re
 import collections
@@ -50,7 +54,7 @@ def parallel_pretokenize(
         processes.append(process)
         process.start()
 
-    for process in processes:
+    for _ in processes:
         # Must get() from queue before join(). O/w the queue fills up and blocks
         # process from put(), and blocks everything
         chunk_pretoken_freq = queue.get()
@@ -121,6 +125,7 @@ def train_bpe(
         collections.defaultdict(lambda: collections.defaultdict(set))
     )
 
+    # Populate initial values
     for pretoken_id, (pretoken, frequency) in enumerate(pretoken_counts.items()):
         pretoken_frequencies[pretoken_id] = frequency
 
@@ -140,31 +145,32 @@ def train_bpe(
         selected_pair = select_pair_to_merge(pair_frequencies)
         new_vocab: bytes = selected_pair[0] + selected_pair[1]
 
+        # Core logic of merging & incrementally updating counts.
         for pretoken_id in pair_positions[selected_pair]:
             frequency = pretoken_frequencies[pretoken_id]
-            init_positions_len = len(pair_positions[selected_pair][pretoken_id])
 
-            # At each position where the pair exists in the pretoken, we merge
-            # the pair and reduce the number of subwords in the pretoken by 1.
-            # If we process [positions] in order, later indices become
-            # invalidated after each iteration. We avoid this problem by
-            # processing in reverse order.
-            for index in reversed(range(init_positions_len)):
-                if index >= len(pair_positions[selected_pair][pretoken_id]):
-                    continue
-
-                position = sorted((pair_positions[selected_pair][pretoken_id]))[index]
+            # Iterate from left to right. Iterating from right to left can
+            # slightly simplify index-shifting handling, but produces
+            # different results. Example: for a single-world corpus 'ooo',
+            # after the 1st merge of ('o', 'o'), left-to-right produces
+            # 'oo o' while right-to-left produces 'o oo'.
+            while len(pair_positions[selected_pair][pretoken_id]) > 0:
                 subwords = pretoken_subwords[pretoken_id]
+                position = min((pair_positions[selected_pair][pretoken_id]))
 
                 # When merging a pair in a token, we must do two things:
-                # 1. Update pair_frequencies for all affected pairs. This
-                # includes pairs *overlapping* with the selected pair.
+                # 1. Update pair_frequencies for all affected pairs. This includes
+                # - pairs *overlapping* with the selected pair.
+                # - selected pair
                 #
                 # 2. Update pair_positions for all affected pairs. This includes
-                # not just pairs overlapping with the selected pair, but also
-                # all pairs after the selected pair in the pretoken. For the
-                # latter, their positions in the pretoken are shifted to the
-                # left by 1.
+                # - Pairs overlapping with the selected pair
+                # - Pairs after the merged pair in this pretoken. Shift
+                #   to the left by 1.
+                #
+                #   Note that when removing positions, remove positions in
+                #   the subword *before* merge; when adding positions, add
+                #   positions in the subword *after* merge.
 
                 # Pair overlapping with the first word
                 # E.g. For pretoken ['a', 'b', 'c', 'd'], merge 'b' and 'c'.
@@ -172,7 +178,7 @@ def train_bpe(
                 if position - 1 >= 0:
                     pair_before_merge = (subwords[position - 1], subwords[position])
                     pair_frequencies[pair_before_merge] -= frequency
-                    pair_positions[pair_before_merge][pretoken_id].remove(position - 1)
+                    pair_positions[pair_before_merge][pretoken_id].discard(position - 1)
 
                     pair_after_merge = (subwords[position - 1], new_vocab)
                     pair_frequencies[pair_after_merge] += frequency
@@ -184,33 +190,37 @@ def train_bpe(
                 if position + 2 < len(subwords):
                     pair_before_merge = (subwords[position + 1], subwords[position + 2])
                     pair_frequencies[pair_before_merge] -= frequency
-                    pair_positions[pair_before_merge][pretoken_id].remove(position + 1)
+                    pair_positions[pair_before_merge][pretoken_id].discard(position + 1)
 
                     pair_after_merge = (new_vocab, subwords[position + 2])
                     pair_frequencies[pair_after_merge] += frequency
                     pair_positions[pair_after_merge][pretoken_id].add(position)
 
+                # Update for selected pair
                 pair_positions[selected_pair][pretoken_id].discard(position)
                 pair_frequencies[selected_pair] -= frequency
 
-                # Even if a pair appears multiple times in the pretoken after
+                # Two edge cases:
+                # 1. Even if a pair appears multiple times in the pretoken after
                 # the merged pair, we just need to shift the index by one!
-                for pair in set(
+                # 2. The pair could be the same as the selected pair!
+                pairs_after_selected_pair = set(
                     zip(subwords[position + 2 :], subwords[position + 3 :])
-                ):
-                    ps = list(pair_positions[pair][pretoken_id])
-                    for idx, p in enumerate(ps):
-                        if p >= position + 2:
-                            ps[idx] -= 1
+                )
 
-                    pair_positions[pair][pretoken_id] = set(ps)
+                for pair in pairs_after_selected_pair:
+                    new_positions = set()
+                    for pos in pair_positions[pair][pretoken_id]:
+                        if pos >= position + 2:
+                            new_positions.add(pos - 1)
+                        else:
+                            new_positions.add(pos)
 
+                    pair_positions[pair][pretoken_id] = new_positions
+
+                # Update subwords
                 subwords[position] = new_vocab
                 subwords.pop(position + 1)
-            
-            assert len(pair_positions[selected_pair][pretoken_id]) == 0
-
-        assert pair_frequencies[selected_pair] == 0
 
         iter += 1
         merges.append(selected_pair)
