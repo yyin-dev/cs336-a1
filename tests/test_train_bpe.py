@@ -53,7 +53,9 @@ def test_train_bpe():
     with open(reference_vocab_path) as f:
         gpt2_reference_vocab = json.load(f)
         reference_vocab = {
-            gpt2_vocab_index: bytes([gpt2_byte_decoder[token] for token in gpt2_vocab_item])
+            gpt2_vocab_index: bytes(
+                [gpt2_byte_decoder[token] for token in gpt2_vocab_item]
+            )
             for gpt2_vocab_item, gpt2_vocab_index in gpt2_reference_vocab.items()
         }
     # Rather than checking that the vocabs exactly match (since they could
@@ -75,7 +77,9 @@ def test_train_bpe_special_tokens(snapshot):
     )
 
     # Check that the special token is not in the vocab
-    vocabs_without_specials = [word for word in vocab.values() if word != b"<|endoftext|>"]
+    vocabs_without_specials = [
+        word for word in vocab.values() if word != b"<|endoftext|>"
+    ]
     for word_bytes in vocabs_without_specials:
         assert b"<|" not in word_bytes
 
@@ -86,3 +90,14 @@ def test_train_bpe_special_tokens(snapshot):
             "merges": merges,
         },
     )
+
+
+def test_train_bpe_overlappings():
+    input_path = FIXTURES_PATH / "overlappings.txt"
+    vocab, merges = run_train_bpe(
+        input_path=input_path,
+        vocab_size=1000,
+        special_tokens=["<|endoftext|>"],
+    )
+
+    assert merges == [(b"o", b"o"), (b"oo", b"oo"), (b"o", b"oooo")]

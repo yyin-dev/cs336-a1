@@ -142,15 +142,18 @@ def train_bpe(
 
         for pretoken_id in pair_positions[selected_pair]:
             frequency = pretoken_frequencies[pretoken_id]
-            positions = sorted(list(pair_positions[selected_pair][pretoken_id]))
+            init_positions_len = len(pair_positions[selected_pair][pretoken_id])
 
             # At each position where the pair exists in the pretoken, we merge
             # the pair and reduce the number of subwords in the pretoken by 1.
             # If we process [positions] in order, later indices become
             # invalidated after each iteration. We avoid this problem by
             # processing in reverse order.
-            for index in reversed(range(len(positions))):
-                position = positions[index]
+            for index in reversed(range(init_positions_len)):
+                if index >= len(pair_positions[selected_pair][pretoken_id]):
+                    continue
+
+                position = sorted((pair_positions[selected_pair][pretoken_id]))[index]
                 subwords = pretoken_subwords[pretoken_id]
 
                 # When merging a pair in a token, we must do two things:
@@ -187,6 +190,9 @@ def train_bpe(
                     pair_frequencies[pair_after_merge] += frequency
                     pair_positions[pair_after_merge][pretoken_id].add(position)
 
+                pair_positions[selected_pair][pretoken_id].discard(position)
+                pair_frequencies[selected_pair] -= frequency
+
                 # Even if a pair appears multiple times in the pretoken after
                 # the merged pair, we just need to shift the index by one!
                 for pair in set(
@@ -201,9 +207,10 @@ def train_bpe(
 
                 subwords[position] = new_vocab
                 subwords.pop(position + 1)
+            
+            assert len(pair_positions[selected_pair][pretoken_id]) == 0
 
-        del pair_frequencies[selected_pair]
-        del pair_positions[selected_pair]
+        assert pair_frequencies[selected_pair] == 0
 
         iter += 1
         merges.append(selected_pair)
