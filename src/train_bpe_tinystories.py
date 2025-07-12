@@ -1,25 +1,54 @@
 from .bpe import train_bpe
 import sys
 import pathlib
-import json
+import pickle
+import cProfile
 
 # Run this with
 # $ uv run -m src.train_bpe_tinystories
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("No path provided")
+    if len(sys.argv) < 3:
+        print("Usage:")
+        print("read FILE")
+        print("train INPUT_FILE OUTPUT_FILE")
         return
 
-    path = pathlib.Path(sys.argv[1])
-    print(f"Training BPE using {path}")
-    vocab, merges = train_bpe(path, 10000, special_tokens=["<|endoftext|>"])
-    merges = list(map(lambda s: (s[0].decode("utf-8"), s[1].decode("utf-8")), merges))
+    operation = str.lower(sys.argv[1])
 
-    with open("tinystories_bpe_result.json", "w") as f:
-        json.dump({"vocab": vocab, "merges": merges}, f)
+    if operation == "read":
+        path = pathlib.Path(sys.argv[2])
+        print(f"Reading from {path}")
+        with open(path, "rb") as f:
+            res = pickle.load(f)
+
+        print("vocab: ")
+        print(res["vocab"])
+        print("merges")
+        print(res["merges"])
+
+        vocab = res["vocab"]
+        longest_vocab = vocab[0]
+        for v in vocab.values():
+            if len(v) > len(longest_vocab):
+                longest_vocab = v
+
+        print(f"Longest vocab: {longest_vocab}. Length: {len(longest_vocab)}")
+    elif operation == "train":
+        path = pathlib.Path(sys.argv[2])
+        output = pathlib.Path(sys.argv[3])
+        print(f"Training BPE using {path}")
+        vocab, merges = train_bpe(path, 10000, special_tokens=["<|endoftext|>"])
+
+        with open(output, "wb") as f:
+            pickle.dump({"vocab": vocab, "merges": merges}, f)
+
+        print("Written to file successfully")
+    else:
+        print("Unknown operation")
 
 
 if __name__ == "__main__":
-    main()
+    # main()
+    cProfile.run("main()", sort="tottime")
