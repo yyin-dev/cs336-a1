@@ -27,7 +27,13 @@ def pretokenize(s, special_tokens: list[str]) -> list[list[bytes]]:
 
     res: list[list[bytes]] = []
 
-    for part in re.split(special_tokens_regex, s):
+    # Edge case: there's no special tokens, so regex becomes "".
+    if special_tokens_regex == "":
+        parts = [s]
+    else:
+        parts = re.split(special_tokens_regex, s)
+
+    for part in parts:
         if part is None:
             continue
 
