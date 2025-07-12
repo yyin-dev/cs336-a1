@@ -9,8 +9,12 @@ import numpy.typing as npt
 import torch
 from torch import Tensor
 
-from ..src.bpe import train_bpe
-from ..src.tokenizer import Tokenizer
+import sys
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(parent_dir)
+
+from src.bpe import train_bpe
+from src.tokenizer import Tokenizer
 
 
 def run_linear(

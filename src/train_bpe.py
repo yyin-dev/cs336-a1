@@ -5,14 +5,14 @@ import pickle
 import cProfile
 
 # Run this with
-# $ uv run -m src.train_bpe_tinystories
+# $ uv run -m src.train_bpe
 
 
 def main():
     if len(sys.argv) < 3:
         print("Usage:")
         print("read FILE")
-        print("train INPUT_FILE OUTPUT_FILE")
+        print("train INPUT_FILE OUTPUT_FILE VOCAB_SIZE")
         return
 
     operation = str.lower(sys.argv[1])
@@ -38,8 +38,9 @@ def main():
     elif operation == "train":
         path = pathlib.Path(sys.argv[2])
         output = pathlib.Path(sys.argv[3])
+        vocab_size = int(sys.argv[4])
         print(f"Training BPE using {path}")
-        vocab, merges = train_bpe(path, 10000, special_tokens=["<|endoftext|>"])
+        vocab, merges = train_bpe(path, vocab_size, special_tokens=["<|endoftext|>"])
 
         with open(output, "wb") as f:
             pickle.dump({"vocab": vocab, "merges": merges}, f)
@@ -50,5 +51,5 @@ def main():
 
 
 if __name__ == "__main__":
-    # main()
-    cProfile.run("main()", sort="tottime")
+    main()
+    # cProfile.run("main()", sort="tottime")
