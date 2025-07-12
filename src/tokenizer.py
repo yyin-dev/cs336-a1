@@ -4,19 +4,20 @@ from typing import Iterable, Iterator
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
 
-def pretokenize(s, special_tokens: list[str]) -> list[list[bytes]]:
+def pretokenize_as_str(s: str, special_tokens: set[str]) -> list[str]:
+    """
+    Return pretokens as str.
+    """
+
     # Different from training, at encoding we should include special tokens
     # in the pretokenization result.
-    #
-    # Special tokens are not broken down into individual bytes. The vocabulary
-    # includes special tokens, so will be encoded as is.
-    speical_tokens_set = set(special_tokens)
 
     # re.split is greedy when finding matches in patterns. For example,
     # re.split("abbc", "(b)|(bb)") returns ["a", "b", "b", "c"].
     # To prioritize longest match, put "bb" before "b" in the regex pattern.
-    special_tokens.sort(key=len, reverse=True)
-    escaped_special_tokens = list(map(re.escape, special_tokens))
+    escaped_special_tokens = list(
+        map(re.escape, sorted(list(special_tokens), key=len, reverse=True))
+    )
 
     # Wrap special token patterns in parenthesis so that they are returned
     # by `re.split`
@@ -25,24 +26,41 @@ def pretokenize(s, special_tokens: list[str]) -> list[list[bytes]]:
     )
     special_tokens_regex = "|".join(escaped_and_wrapped_in_parens)
 
-    res: list[list[bytes]] = []
-
     # Edge case: there's no special tokens, so regex becomes "".
     if special_tokens_regex == "":
         parts = [s]
     else:
         parts = re.split(special_tokens_regex, s)
 
+    res: list[str] = []
     for part in parts:
         if part is None:
             continue
 
-        if part in speical_tokens_set:
-            res.append([part.encode("utf-8")])
-            continue
+        if part in special_tokens:
+            res.append(part)
+        else:
+            for pretoken in re.finditer(PAT, part):
+                res.append(pretoken.group())
 
-        for pretoken in re.finditer(PAT, part):
-            b = pretoken.group().encode("utf-8")
+    return res
+
+
+def pretokenize(s: str, special_tokens: set[str]) -> list[list[bytes]]:
+    """
+    Return pretokens as list[bytes]. Special tokens are not broken down into
+    individual bytes. The vocabulary includes special tokens, so will be encoded
+    as is.
+    """
+
+    pretokens = pretokenize_as_str(s, special_tokens)
+
+    res: list[list[bytes]] = []
+    for pretoken in pretokens:
+        if pretoken in special_tokens:
+            res.append([pretoken.encode("utf-8")])
+        else:
+            b = pretoken.encode("utf-8")
             bs: list[bytes] = [b[i : i + 1] for i in range(len(b))]
             res.append(bs)
 
@@ -77,7 +95,9 @@ class Tokenizer:
         if special_tokens is None:
             special_tokens = []
 
-        self.special_tokens: list[str] = special_tokens
+        self.special_tokens: set[str] = set(special_tokens)
+        self.special_tokens.add("<|endoftext|>")
+        print(f"Special tokens: {self.special_tokens}")
 
     def encode(self, text: str) -> list[int]:
         pretokens = pretokenize(text, self.special_tokens)
@@ -110,7 +130,39 @@ class Tokenizer:
         return res
 
     def encode_iterable(self, iterable: Iterable[str]) -> Iterator[int]:
-        raise NotImplementedError
+        """
+        Given an iterable of strings, return a generator that lazily yields
+        token IDs. This is required for memory-efficient tokenization of large
+        files that we cannot load directly into memory.
+        """
+        # We need to break the file into chunks, and process each chunk in-turn.
+        # Need to make sure that a token doesn't cross chunk boundaries. Let's
+        # use the same trick in pretokenization: split by speical tokens.
+        #
+        # Algorithm: after seeing the n-th special token, we know the string
+        # between n-1-th and n-th speical tokens is a valid chunk. A chunk could
+        # cross the results from [iterable]!
+        current_chunk = ""
+        for s in iterable:
+            # Don't forget leftover from previous iteration!
+            s = current_chunk + s
+            current_chunk = ""
+
+            pretokens = pretokenize_as_str(s, self.special_tokens)
+
+            for pretoken in pretokens:
+                current_chunk += pretoken
+
+                if pretoken in self.special_tokens:
+                    # This is a valid chunk, yield all token ids in the chunk
+                    for id in self.encode(current_chunk):
+                        yield id
+
+                    current_chunk = ""
+
+        # yield any remaining ids
+        for id in self.encode(current_chunk):
+            yield id
 
     def decode(self, ids: list[int]) -> str:
         return b"".join([self.vocab[id] for id in ids]).decode(
