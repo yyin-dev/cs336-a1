@@ -1,5 +1,32 @@
 """
 BPE (Byte Pair Encoding) training.
+
+Time complexity analysis
+------------------------
+
+Let V be the vocabulary size. Let L be the corpus size as number of pretokens.
+The number of merges is O(V - 256 - speical tokens) = O(V).
+
+The pretokenization phase takes O(L) time.
+
+- For naive implementation.
+  - For each merging:
+    - Find the pair to merge takes O(L) because it iterates over all pretokens.
+    - Merging takes O(L) because we need to iterate over all pretokens too.
+  - So the total complexity is O(VL)
+
+- For the implementation that tracks pair positions
+  - For each merging:
+    - Assuming we store pair counts in a heap, finding the pair takes O(1) time, 
+      and maintaining it takes O(logP) time, where P is the number of pairs.
+    - Merging one occurence of a pair takes O(1) time.
+  - Total time depends on the total number of occurences processed across all 
+    merge iterations. So the total time is:
+    - pretokenization: O(L)
+    - finding pair to merge: O(V logP).
+    - merging: O(C), where C is the total number of occurence of all merged pairs.
+    - It seems right to say that both P and C are O(L). So total time is 
+      O(L) + O(V logL) + O(L) = O(L + VlogL).
 """
 
 import os
