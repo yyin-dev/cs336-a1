@@ -103,29 +103,38 @@ class Tokenizer:
         pretokens = pretokenize(text, self.special_tokens)
         res = []
         for pretoken in pretokens:
-            current: list[bytes] = pretoken.copy()
+            entire_pretoken = b"".join(pretoken)
+            if entire_pretoken in self.reversed_vocab:
+                res.append(self.reversed_vocab[entire_pretoken])
+            else:
+                current: list[bytes] = pretoken
 
-            for merge in self.merges:
-                next: list[bytes] = []
+                for merge in self.merges:
+                    n = len(current)
+                    if n == 1:
+                        break
 
-                idx = 0
-                while idx < len(current):
-                    if idx + 1 < len(current) and merge == (
-                        current[idx],
-                        current[idx + 1],
-                    ):
-                        # print(f"Merge pair: {merge}")
-                        next.append(current[idx] + current[idx + 1])
-                        idx += 2
-                    else:
-                        next.append(current[idx])
-                        idx += 1
+                    # Find merges from left to right
+                    merges = []
+                    idx = 0
+                    while idx < n:
+                        if idx + 1 < n and merge == (
+                            current[idx],
+                            current[idx + 1],
+                        ):
+                            merges.append(idx)
+                            idx += 2
+                        else:
+                            idx += 1
 
-                current = next
+                    # Merge from right to left, to avoid index shifting
+                    for merge_idx in reversed(merges):
+                        current[merge_idx] = current[merge_idx] + current[merge_idx + 1]
+                        current.pop(merge_idx + 1)
 
-            # Turn vocab into int
-            encoded = [self.reversed_vocab[w] for w in current]
-            res.extend(encoded)
+                # Turn vocab into int
+                encoded = [self.reversed_vocab[w] for w in current]
+                res.extend(encoded)
 
         return res
 

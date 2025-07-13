@@ -2,6 +2,7 @@ import pathlib
 import os
 import sys
 import json
+import cProfile
 
 # Run this with so that relative import works without path hack
 # $ uv run -m profiling.tokenizer
@@ -62,12 +63,17 @@ def main():
         merges_path=MERGES_PATH,
     )
 
-    with open(FIXTURES_PATH / "tinystories_sample.txt") as f:
-        contents = f.read()
-        _ = tokenizer.encode(contents)
+    with open(FIXTURES_PATH / "tinystories_sample_5M.txt") as f:
+        iter = False
+        if iter:
+            ids = []
+            for _id in tokenizer.encode_iterable(f):
+                ids.append(_id)
+        else:
+            contents = f.read()
+            _ = tokenizer.encode(contents)
 
 
 if __name__ == "__main__":
-    import cProfile
-
-    cProfile.run("main()", sort="tottime")
+    # cProfile.run("main()", sort="tottime")
+    main()
