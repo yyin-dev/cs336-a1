@@ -1,11 +1,17 @@
-from .bpe import train_bpe
+import os
+import sys
+
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(parent_dir)
+from src.bpe import train_bpe
+
 import sys
 import pathlib
 import pickle
 import cProfile
 
 # Run this with
-# $ uv run -m src.train_bpe
+# $ uv run -m expriments.train_bpe
 
 
 def main():
