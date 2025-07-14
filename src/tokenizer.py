@@ -1,4 +1,5 @@
 import regex as re
+import logger
 from typing import Iterable, Iterator
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
@@ -92,12 +93,82 @@ class Tokenizer:
         self.reversed_vocab: dict[bytes, int] = reversed_vocab
 
         self.merges: list[tuple[bytes, bytes]] = merges
+        self.merges_dict: dict[tuple[bytes, bytes], int] = {}
+        for index, merge in enumerate(merges):
+            priority = index
+            self.merges_dict[merge] = priority
+
         if special_tokens is None:
             special_tokens = []
-
         self.special_tokens: set[str] = set(special_tokens)
         self.special_tokens.add("<|endoftext|>")
-        print(f"Special tokens: {self.special_tokens}")
+        logger.info(f"Special tokens: {self.special_tokens}")
+
+    def apply_merges_naive(self, current: list[bytes]):
+        """
+        This function has no return value. Update [pretoken] in place.
+        """
+        print(f"pretoken: {current}")
+
+        # Naive approach:
+        # For each merge, iterate through all pairs in the pretoken.
+        # Time complexity: O(merges x avg pretoken length)
+        for merge in self.merges:
+            n = len(current)
+            if n == 1:
+                break
+
+            # Find merges from left to right
+            merges = []
+            idx = 0
+            while idx < n:
+                if idx + 1 < n and merge == (
+                    current[idx],
+                    current[idx + 1],
+                ):
+                    merges.append(idx)
+                    idx += 2
+                else:
+                    idx += 1
+
+            # Merge from right to left, to avoid index shifting
+            for merge_idx in reversed(merges):
+                current[merge_idx] = current[merge_idx] + current[merge_idx + 1]
+                current.pop(merge_idx + 1)
+
+    def apply_merges_optimized(self, current: list[bytes]):
+        if len(current) == 1:
+            return
+
+        while True:
+            highest_priority_pair = None
+            highest_priority = len(self.merges)
+            for pair in zip(current[:-1], current[1:]):
+                if pair not in self.merges_dict:
+                    continue
+
+                priority = self.merges_dict[pair]
+                if highest_priority_pair is None or priority < highest_priority:
+                    highest_priority = priority
+                    highest_priority_pair = pair
+                elif priority == highest_priority:
+                    highest_priority_pair = pair
+
+            if highest_priority_pair is None:
+                break
+
+            idx = 0
+            merge_indices = []
+            while idx < len(current) - 1:
+                if highest_priority_pair == (current[idx], current[idx + 1]):
+                    merge_indices.append(idx)
+                    idx += 2
+                else:
+                    idx += 1
+
+            for merge_idx in reversed(merge_indices):
+                current[merge_idx] = current[merge_idx] + current[merge_idx + 1]
+                current.pop(merge_idx + 1)
 
     def encode(self, text: str) -> list[int]:
         pretokens = pretokenize(text, self.special_tokens)
@@ -108,29 +179,8 @@ class Tokenizer:
                 res.append(self.reversed_vocab[entire_pretoken])
             else:
                 current: list[bytes] = pretoken
-
-                for merge in self.merges:
-                    n = len(current)
-                    if n == 1:
-                        break
-
-                    # Find merges from left to right
-                    merges = []
-                    idx = 0
-                    while idx < n:
-                        if idx + 1 < n and merge == (
-                            current[idx],
-                            current[idx + 1],
-                        ):
-                            merges.append(idx)
-                            idx += 2
-                        else:
-                            idx += 1
-
-                    # Merge from right to left, to avoid index shifting
-                    for merge_idx in reversed(merges):
-                        current[merge_idx] = current[merge_idx] + current[merge_idx + 1]
-                        current.pop(merge_idx + 1)
+                # self.apply_merges_naive(current)
+                self.apply_merges_optimized(current)
 
                 # Turn vocab into int
                 encoded = [self.reversed_vocab[w] for w in current]
