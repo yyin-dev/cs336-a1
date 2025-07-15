@@ -33,7 +33,7 @@ import os
 import regex as re
 import collections
 from multiprocessing import Process, Queue
-from .pretokenization_example import find_chunk_boundaries
+from pretokenization_example import find_chunk_boundaries
 import logger
 import heapq
 
@@ -203,6 +203,71 @@ def select_pair_to_merge(
     return pair_frequencies.pop_max()[0]
 
 
+def train_bpe_simple(
+    input_path: str | os.PathLike,
+    vocab_size: int,
+    special_tokens: list[str],
+    **kwargs,
+) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
+    pretoken_counts: dict[bytes, int] = parallel_pretokenize(input_path, special_tokens)
+    logger.info("Finished pretokenization!")
+
+    pretoken_freq: dict[tuple, int] = {}
+    pair_frequencies: PairFrequencyHeap = PairFrequencyHeap()
+    for pretoken, count in pretoken_counts.items():
+        frequency = count
+        subwords = tuple(map(int.to_bytes, list(pretoken)))
+        pretoken_freq[subwords] = frequency
+        for pair in [(subwords[i], subwords[i + 1]) for i in range(len(subwords) - 1)]:
+            pair_frequencies.update_frequency(pair, frequency)
+
+    vocab: list[bytes] = list(map(int.to_bytes, list(range(0, 256))))
+    vocab.extend(list(map(lambda s: s.encode("utf-8"), special_tokens)))
+    merges: list[tuple[bytes, bytes]] = []
+
+    while len(vocab) < vocab_size:
+        selected_pair = select_pair_to_merge(pair_frequencies)
+        if selected_pair is None:
+            break
+
+        new_vocab = selected_pair[0] + selected_pair[1]
+
+        merged_pretoken_freq: dict[tuple, int] = collections.defaultdict(int)
+        pair_frequency_updates = collections.defaultdict(int)
+        for pretoken_subwords, freq in pretoken_freq.items():
+            merged_pretoken_subwords: list[bytes] = [pretoken_subwords[0]]
+
+            for curr_subword in pretoken_subwords[1:]:
+                prev_subword = merged_pretoken_subwords[-1]
+
+                if (prev_subword, curr_subword) == selected_pair:
+                    merged_pretoken_subwords[-1] = new_vocab
+                else:
+                    merged_pretoken_subwords.append(curr_subword)
+
+            merged_pretoken_freq[tuple(merged_pretoken_subwords)] = freq
+
+            if len(pretoken_subwords) > len(merged_pretoken_subwords):
+                for pair in zip(pretoken_subwords[:-1], pretoken_subwords[1:]):
+                    pair_frequency_updates[pair] -= freq
+
+                for pair in zip(
+                    merged_pretoken_subwords[:-1], merged_pretoken_subwords[1:]
+                ):
+                    pair_frequency_updates[pair] += freq
+
+        # Batch frequency update from all merges
+        for pair, frequency_update in pair_frequency_updates.items():
+            pair_frequencies.update_frequency(pair, frequency_update)
+
+        pretoken_freq = merged_pretoken_freq
+
+        vocab.append(new_vocab)
+        merges.append(selected_pair)
+
+    return (dict(enumerate(vocab)), merges)
+
+
 def train_bpe(
     input_path: str | os.PathLike,
     vocab_size: int,
@@ -357,3 +422,6 @@ def train_bpe(
 
     logger.info("Finished training BPE tokenizer!")
     return (dict(enumerate(vocab)), merges)
+
+
+train_bpe = train_bpe_simple
