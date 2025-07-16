@@ -32,16 +32,19 @@ The pretokenization phase takes O(L) time.
 import os
 import regex as re
 import collections
-from multiprocessing import Process, Queue
+from multiprocessing import Pool
 from pretokenization_example import find_chunk_boundaries
 import logger
 import heapq
 
-NUM_CHUNKS = 6
+# TODO: Ideally we want to pick NUM_PROCESSES and NUM_CHUNKS based on number of
+# cpu cores, file size etc.
+NUM_PROCESSES = 8
+NUM_CHUNKS = 64
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
 
-def pretokenize_chunk(input_path, start, end, special_tokens, queue):
+def pretokenize_chunk(input_path, start, end, special_tokens) -> dict[bytes, int]:
     logger.info(f"Start pretokenizing chunk, {start}, {end}")
     escaped_special_tokens = list(map(re.escape, special_tokens))
     special_tokens_regex = "|".join(escaped_special_tokens)
@@ -63,9 +66,12 @@ def pretokenize_chunk(input_path, start, end, special_tokens, queue):
             pretoken_freq[pretoken_bytes] += 1
 
     logger.info(f"Done pretokenizing chunk, {start}, {end}")
-    queue.put(pretoken_freq)
-
     return pretoken_freq
+
+
+def pretokenize_chunk_wrapper(args) -> dict[bytes, int]:
+    (input_path, start, end, special_tokens) = args
+    return pretokenize_chunk(input_path, start, end, special_tokens)
 
 
 def parallel_pretokenize(
@@ -77,42 +83,16 @@ def parallel_pretokenize(
             f, NUM_CHUNKS, "<|endoftext|>".encode("utf-8")
         )
 
-    queue = Queue()
-    processes = []
+    pool = Pool(NUM_PROCESSES)
+    args_list = [
+        (input_path, start, end, special_tokens)
+        for (start, end) in zip(chunk_boundaries[:-1], chunk_boundaries[1:])
+    ]
+    results = pool.map(pretokenize_chunk_wrapper, args_list)
 
-    # Set to False to save memory with serial pretokenization to when deal with
-    # very large corpus.
-    parallel = True
-
-    if parallel:
-        logger.info("Parallel tokenization!")
-        for start, end in zip(chunk_boundaries[:-1], chunk_boundaries[1:]):
-            process = Process(
-                target=pretokenize_chunk,
-                args=(input_path, start, end, special_tokens, queue),
-            )
-            processes.append(process)
-            process.start()
-
-        for _ in processes:
-            # Must get() from queue before join(). O/w the queue fills up and blocks
-            # process from put(), and blocks everything
-            chunk_pretoken_freq = queue.get()
-
-            for pretoken, freq in chunk_pretoken_freq.items():
-                pretoken_freq[pretoken] += freq
-
-        for process in processes:
-            process.join()
-    else:
-        logger.info("Serial tokenization!")
-        for start, end in zip(chunk_boundaries[:-1], chunk_boundaries[1:]):
-            chunk_pretoken_freq = pretokenize_chunk(
-                input_path, start, end, special_tokens, queue
-            )
-
-            for pretoken, freq in chunk_pretoken_freq.items():
-                pretoken_freq[pretoken] += freq
+    for chunk_pretoken_freq in results:
+        for pretoken, freq in chunk_pretoken_freq.items():
+            pretoken_freq[pretoken] += freq
 
     return pretoken_freq
 
@@ -226,6 +206,7 @@ def train_bpe_simple(
     merges: list[tuple[bytes, bytes]] = []
 
     while len(vocab) < vocab_size:
+        logger.info(f"vocab len: {len(vocab)}")
         selected_pair = select_pair_to_merge(pair_frequencies)
         if selected_pair is None:
             break
@@ -317,6 +298,9 @@ def train_bpe(
     )
 
     # Populate initial values
+    # Batch update pair frequencies
+    logger.info("Initializing...")
+    init_pair_frequencies = collections.defaultdict(int)
     for pretoken_id, (pretoken, frequency) in enumerate(pretoken_counts.items()):
         pretoken_frequencies[pretoken_id] = frequency
 
@@ -324,19 +308,27 @@ def train_bpe(
         pretoken_subwords[pretoken_id] = subwords
 
         for position, pair in enumerate(zip(subwords[:-1], subwords[1:])):
-            pair_frequencies.update_frequency(pair, frequency)
+            init_pair_frequencies[pair] += frequency
             pair_positions[pair][pretoken_id].add(position)
+
+    for pair, freq in init_pair_frequencies.items():
+        pair_frequencies.push(pair, freq)
+
+    logger.info("Finishing initialization!")
 
     iter = 0
     merges: list[tuple[bytes, bytes]] = []
     while len(vocab) < vocab_size:
+        logger.info(f"vocab len: {len(vocab)}")
         selected_pair = select_pair_to_merge(pair_frequencies)
         if selected_pair is None:
             break
 
+        print(f"Selected pair: {selected_pair}")
         new_vocab: bytes = selected_pair[0] + selected_pair[1]
 
         # Core logic of merging & incrementally updating counts.
+        pair_frequency_updates = collections.defaultdict(int)
         for pretoken_id in pair_positions[selected_pair]:
             frequency = pretoken_frequencies[pretoken_id]
 
@@ -368,11 +360,11 @@ def train_bpe(
                 # The pair ('a', 'b') becomes ('a', 'bc')
                 if position - 1 >= 0:
                     pair_before_merge = (subwords[position - 1], subwords[position])
-                    pair_frequencies.update_frequency(pair_before_merge, -frequency)
+                    pair_frequency_updates[pair_before_merge] -= frequency
                     pair_positions[pair_before_merge][pretoken_id].discard(position - 1)
 
                     pair_after_merge = (subwords[position - 1], new_vocab)
-                    pair_frequencies.update_frequency(pair_after_merge, frequency)
+                    pair_frequency_updates[pair_after_merge] += frequency
                     pair_positions[pair_after_merge][pretoken_id].add(position - 1)
 
                 # Pair overlapping with the second word
@@ -380,11 +372,11 @@ def train_bpe(
                 # The pair ('c', 'd') becomes ('bc', 'd')
                 if position + 2 < len(subwords):
                     pair_before_merge = (subwords[position + 1], subwords[position + 2])
-                    pair_frequencies.update_frequency(pair_before_merge, -frequency)
+                    pair_frequency_updates[pair_before_merge] -= frequency
                     pair_positions[pair_before_merge][pretoken_id].discard(position + 1)
 
                     pair_after_merge = (new_vocab, subwords[position + 2])
-                    pair_frequencies.update_frequency(pair_after_merge, frequency)
+                    pair_frequency_updates[pair_after_merge] += frequency
                     pair_positions[pair_after_merge][pretoken_id].add(position)
 
                 # Update for selected pair
@@ -401,12 +393,10 @@ def train_bpe(
                 )
 
                 for pair in pairs_after_selected_pair:
-                    new_positions = set()
-                    for pos in pair_positions[pair][pretoken_id]:
-                        if pos >= position + 2:
-                            new_positions.add(pos - 1)
-                        else:
-                            new_positions.add(pos)
+                    new_positions = {
+                        pos if pos < position + 2 else pos - 1
+                        for pos in pair_positions[pair][pretoken_id]
+                    }
 
                     pair_positions[pair][pretoken_id] = new_positions
 
@@ -416,6 +406,9 @@ def train_bpe(
 
         del pair_positions[selected_pair]
 
+        for pair, freq_update in pair_frequency_updates.items():
+            pair_frequencies.update_frequency(pair, freq_update)
+
         iter += 1
         merges.append(selected_pair)
         vocab.append(new_vocab)
@@ -424,4 +417,4 @@ def train_bpe(
     return (dict(enumerate(vocab)), merges)
 
 
-train_bpe = train_bpe_simple
+# train_bpe = train_bpe_simple

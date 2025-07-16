@@ -99,7 +99,11 @@ def main():
 
     # Execute command
     if hasattr(args, "profile") and args.profile:
-        cProfile.run("args.func(args)", sort="tottime")
+        profiler = cProfile.Profile()
+        profiler.enable()
+        args.func(args)
+        profiler.disable()
+        profiler.print_stats(sort="tottime")
     else:
         args.func(args)
 
