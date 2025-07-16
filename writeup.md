@@ -55,7 +55,7 @@ $ uv run -m src.train_bpe train ../data/TinyStoriesV2-GPT4-train.txt ../ts-train
 $ uv run -m src.train_bpe read ../ts-train-bpe.pkl
 ```
 
-(a) It takes about 7mins on CPU. The longest token in the vocabulary is `b' accomplishment'`. 
+(a) It takes about 1.5min on CPU. The longest token in the vocabulary is `b' accomplishment'`. 
 
 (b) It spends a lot of time in finding the next token with the highest frequency. We could make this more efficient using a heap / priority-queue.
 
@@ -79,4 +79,45 @@ $ uv run -m src.train_bpe read ../ts-train-bpe.pkl
 $ uv run -m src.train_bpe train ../data/owt_valid.txt ../owt-val-bpe.pkl 32000
 ```
 
-Training on the validation took about 53 minutes, using a peak memory of around 3G. The longest token in the vocabulary is `b'abc'`.
+Training on the validation set took about 3.5 minutes, using a peak memory of around 3G. The longest token in the vocabulary is `b'abc'`.
+
+```
+$ uv run -m experiments.train_bpe train --input ../data/owt_train.txt --output-file ../owt-train-bpe.pkl --vocab-size 32000
+```
+
+Training on the training set took about 3.5 hours, using a peak memory of around 20G. The longest token is `ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ`, which takes 64 bytes (each `Â` is 4 byte in utf-8). This makes sense because the text contains long sequences of `Â`s.
+
+Note about training:
+
+```
+$ uv run -m experiments.owt_train_bpe_visualize ../owt-train-bpe.log
+Parsing log file: ../owt-train-bpe.log
+Successfully parsed 31743 vocab entries
+
+==================================================
+TIME BETWEEN LOG LINES STATISTICS
+==================================================
+Min time between log lines: 0.000000 seconds
+Max time between log lines: 1092.774000 seconds
+Average time between log lines: 0.364283 seconds
+Median time between log lines: 0.005000 seconds
+
+==================================================
+VOCAB PROCESSING ANALYSIS
+==================================================
+Total pairs processed: 15871
+Average processing time: 0.370254 seconds
+
+Vocab pairs taking more than 1 minute to process:
+  (b'i', b't') -> 625.189000 seconds (10.42 minutes)
+  (b'a', b'd') -> 760.342000 seconds (12.67 minutes)
+  (b'i', b'b') -> 1078.598000 seconds (17.98 minutes)
+  (b'\xc3', b'\x83') -> 146.270000 seconds (2.44 minutes)
+  (b'd', b's') -> 1051.840000 seconds (17.53 minutes)
+  (b'S', b'F') -> 984.581000 seconds (16.41 minutes)
+==================================================
+```
+
+It seems that certain pairs (6 out of 32000) are very expensive to merge (longer than 1 minute), while others are very cheap (the medium and average are well under 0.5s).
+
+![owt_train](./experiments/owt_train.png)

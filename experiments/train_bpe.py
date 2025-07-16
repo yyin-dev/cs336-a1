@@ -33,7 +33,8 @@ def command_read(args):
         if len(v) > len(longest_vocab):
             longest_vocab = v
 
-    print(f"Longest vocab: {longest_vocab}. Length: {len(longest_vocab)}")
+    longest_vocab_decoded = longest_vocab.decode("utf-8")
+    print(f"Longest vocab: {longest_vocab}. Decoded as: {longest_vocab_decoded}. Length: {len(longest_vocab)}")
 
 
 def command_train(args):
