@@ -3,6 +3,7 @@ import logger
 from typing import Iterable, Iterator
 
 PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+COMPILED_PAT = re.compile(PAT)
 
 
 def pretokenize_as_str(s: str, special_tokens: set[str]) -> list[str]:
@@ -41,7 +42,7 @@ def pretokenize_as_str(s: str, special_tokens: set[str]) -> list[str]:
         if part in special_tokens:
             res.append(part)
         else:
-            for pretoken in re.finditer(PAT, part):
+            for pretoken in COMPILED_PAT.finditer(part):
                 res.append(pretoken.group())
 
     return res
@@ -102,14 +103,11 @@ class Tokenizer:
             special_tokens = []
         self.special_tokens: set[str] = set(special_tokens)
         self.special_tokens.add("<|endoftext|>")
-        logger.info(f"Special tokens: {self.special_tokens}")
 
     def apply_merges_naive(self, current: list[bytes]):
         """
         This function has no return value. Update [pretoken] in place.
         """
-        print(f"pretoken: {current}")
-
         # Naive approach:
         # For each merge, iterate through all pairs in the pretoken.
         # Time complexity: O(merges x avg pretoken length)
@@ -172,6 +170,7 @@ class Tokenizer:
 
     def encode(self, text: str) -> list[int]:
         pretokens = pretokenize(text, self.special_tokens)
+        logger.info("Finished pretokenization")
         res = []
         for pretoken in pretokens:
             entire_pretoken = b"".join(pretoken)

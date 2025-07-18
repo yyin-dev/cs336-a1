@@ -57,6 +57,8 @@ $ uv run -m src.train_bpe read ../ts-train-bpe.pkl
 
 (a) It takes about 1.5min on CPU. The longest token in the vocabulary is `b' accomplishment'`. 
 
+Without priority-queue optimization, this takes 7min on CPU.
+
 (b) It spends a lot of time in finding the next token with the highest frequency. We could make this more efficient using a heap / priority-queue.
 
 ```
@@ -79,13 +81,15 @@ $ uv run -m src.train_bpe read ../ts-train-bpe.pkl
 $ uv run -m src.train_bpe train ../data/owt_valid.txt ../owt-val-bpe.pkl 32000
 ```
 
-Training on the validation set took about 3.5 minutes, using a peak memory of around 3G. The longest token in the vocabulary is `b'abc'`.
+Training on the validation set took about 3.5 minutes, using a peak memory of around 3G. The longest token in the vocabulary is `b'abc'`.Without the priority-queue optimizaiton, it takes about 53mins on CPU.
 
 ```
 $ uv run -m experiments.train_bpe train --input ../data/owt_train.txt --output-file ../owt-train-bpe.pkl --vocab-size 32000
 ```
 
-Training on the training set took about 3.5 hours, using a peak memory of around 20G. The longest token is `ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ`, which takes 64 bytes (each `Â` is 4 byte in utf-8). This makes sense because the text contains long sequences of `Â`s.
+Training on the training set took about 3.5 hours, using a peak memory of around 20G. I think the following ingredients are important: (1) priority-queue optimization for selecting pair to merge (2) batched frequency-update to reduce overhead of using priority-queue, (3) parallel pretokenization with small chunk size to avoid OOMing my 16GB Mac.
+
+The longest token is `ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ`, which takes 64 bytes (each `Â` is 4 byte in utf-8). This makes sense because the text contains long sequences of `Â`s.
 
 Note about training:
 
@@ -121,3 +125,75 @@ Vocab pairs taking more than 1 minute to process:
 It seems that certain pairs (6 out of 32000) are very expensive to merge (longer than 1 minute), while others are very cheap (the medium and average are well under 0.5s).
 
 ![owt_train](./experiments/owt_train.png)
+
+## Problem (tokenizer_experiments)
+
+Performance comparison:
+
+* TS valid
+  * My tokenizer (multi-process): 8 seconds
+  * Tiktoken (single thread): 1.5 second
+  * Compression ratio: 4.12
+* TS train:
+  * My tokenizer (multi-process): 35 min
+  * Tiktoken (single thread): 3min
+  * Compression ratio: 4.11
+* OWT valid:
+  * My tokenizer (multi-process): 35min
+  * Tiktoken (single thread): 20s
+  * Compression ratio: 4.37
+* OWT train:
+  * My tokenizer (multi-process): doesn't finish after 10 hours
+  * Tiktoken (single thread): 
+
+Encoding takes about 12 seconds on TS valid, about 35min on TS train, about 35min on OWT valid.
+
+```
+$ time uv run -m experiments.tokenizer_experiment encode --bpe-file ../ts-valid-bpe.pkl --input-file ../data/TinyStoriesV2-GPT4-valid.txt --output-file ../ts-valid-encoded.npy
+Encoding output length: 5461747
+Input length: 22502601
+Byte per token: 4.12
+Token IDs saved to ../ts-valid-encoded.npy.npy
+uv run -m experiments.tokenizer_experiment encode --bpe-file  --input-file     12.97s user 0.11s system 98% cpu 13.248 total
+
+$ time uv run -m experiments.tokenizer_experiment encode --bpe-file ../ts-train-bpe.pkl --input-file ../data/TinyStoriesV2-GPT4-train.txt --output-file ../ts-train-encoded.npy
+Encoding output length: 541229347
+Input length: 2227753162
+Byte per token: 4.11
+Token IDs saved to ../ts-train-encoded.npy.npy
+uv run -m experiments.tokenizer_experiment encode --bpe-file  --input-file     2123.18s user 10.61s system 99% cpu 35:36.77 total
+
+$ time uv run -m experiments.tokenizer_experiment encode --bpe-file ../owt-valid-bpe.pkl --input-file ../data/owt_valid.txt --output-file ../owt-valid-encoded.npy
+Encoding output length: 66296750
+Input length: 289998753
+Byte per token: 4.37
+Token IDs saved to ../owt-valid-encoded.npy.npy
+uv run -m experiments.tokenizer_experiment encode --bpe-file  --input-file     2134.74s user 8.50s system 99% cpu 35:48.59 total
+```
+
+(b) It would still work but the compression rate will be lower.
+
+(c) This depends on the vocab size. 
+
+* If we approximate using tiny-stories training set results. Vocab = 10000, text size = 2.23GB, time = 35min, speed = 1 MB/s.
+* If we approxmiate using owt_valid.txt results. Vocab_size = 32000, text size = 290MB, time = 35min, speed = 0.15MB/s.
+
+It would take... really long for my tokenizer.
+
+For single-thread tiktoken, 
+
+* If we approximate using tiny-stories training set results. Vocab = 10000, text size = 2.23GB, time = 3min, speed = 13 MB/s.
+* If we approxmiate using owt_valid.txt results. Vocab_size = 32000, text size = 290MB, time = 30s, speed = 10MB/s.
+
+(d)
+
+## Notes
+
+BPE's training output could contain invalid UTF-8 because it operates at the byte-level instead of character level (it starts with a vocab of 0-255), thus it could split one UTF-8 character into two subwords.
+
+But why does [GPT-2's vocab](https://huggingface.co/openai-community/gpt2/blob/main/vocab.json) contain only valid UTF-8? The reason is that GPT-2 uses a cleve encoding scheme to map all 256 byte values to valid Unicode characters.
+
+* Printable ASCII bytes (33-126, 161-172, 174-255) map to themselves
+* Non-printable bytes (0-32, 127-160, 173) map to Unicode Private Use Area characters
+
+As a result, the vocab file is a representation: The strings in vocab.json are valid UTF-8 representations of arbitrary byte sequences, not the raw bytes themselves

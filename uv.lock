@@ -30,6 +30,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "matplotlib" },
+    { name = "tiktoken" },
 ]
 
 [package.metadata]
@@ -50,7 +51,10 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-dev = [{ name = "matplotlib", specifier = ">=3.10.3" }]
+dev = [
+    { name = "matplotlib", specifier = ">=3.10.3" },
+    { name = "tiktoken", specifier = ">=0.9.0" },
+]
 
 [[package]]
 name = "annotated-types"
