@@ -144,32 +144,7 @@ Performance comparison:
   * Compression ratio: 4.37
 * OWT train:
   * My tokenizer (multi-process): doesn't finish after 10 hours
-  * Tiktoken (single thread): 
-
-Encoding takes about 12 seconds on TS valid, about 35min on TS train, about 35min on OWT valid.
-
-```
-$ time uv run -m experiments.tokenizer_experiment encode --bpe-file ../ts-valid-bpe.pkl --input-file ../data/TinyStoriesV2-GPT4-valid.txt --output-file ../ts-valid-encoded.npy
-Encoding output length: 5461747
-Input length: 22502601
-Byte per token: 4.12
-Token IDs saved to ../ts-valid-encoded.npy.npy
-uv run -m experiments.tokenizer_experiment encode --bpe-file  --input-file     12.97s user 0.11s system 98% cpu 13.248 total
-
-$ time uv run -m experiments.tokenizer_experiment encode --bpe-file ../ts-train-bpe.pkl --input-file ../data/TinyStoriesV2-GPT4-train.txt --output-file ../ts-train-encoded.npy
-Encoding output length: 541229347
-Input length: 2227753162
-Byte per token: 4.11
-Token IDs saved to ../ts-train-encoded.npy.npy
-uv run -m experiments.tokenizer_experiment encode --bpe-file  --input-file     2123.18s user 10.61s system 99% cpu 35:36.77 total
-
-$ time uv run -m experiments.tokenizer_experiment encode --bpe-file ../owt-valid-bpe.pkl --input-file ../data/owt_valid.txt --output-file ../owt-valid-encoded.npy
-Encoding output length: 66296750
-Input length: 289998753
-Byte per token: 4.37
-Token IDs saved to ../owt-valid-encoded.npy.npy
-uv run -m experiments.tokenizer_experiment encode --bpe-file  --input-file     2134.74s user 8.50s system 99% cpu 35:48.59 total
-```
+  * Tiktoken (single thread): 17mins. I had to split into chunks to not get OOMed on my 16GB Mac.
 
 (b) It would still work but the compression rate will be lower.
 
@@ -183,9 +158,7 @@ It would take... really long for my tokenizer.
 For single-thread tiktoken, 
 
 * If we approximate using tiny-stories training set results. Vocab = 10000, text size = 2.23GB, time = 3min, speed = 13 MB/s.
-* If we approxmiate using owt_valid.txt results. Vocab_size = 32000, text size = 290MB, time = 30s, speed = 10MB/s.
-
-(d)
+* If we approxmiate using owt_train.txt results. Vocab_size = 32000, text size = 2.2GB, time = 17min, speed = 12MB/s.
 
 ## Notes
 

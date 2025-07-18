@@ -79,7 +79,10 @@ def command_encode(args):
             f, num_chunks, "<|endoftext|>".encode("utf-8")
         )
 
-    res = []
+    # Instead of keeping np.append after every chunk, keep np arrays in a list 
+    # and do np.concat at the end.
+    # np.append is O(m+n) and copies both arrays into a new memory location.
+    np_arrays: list[np.ndarray] = []
     with open(args.input_file, "rb") as f:
         for start, end in zip(boundaries[:-1], boundaries[1:]):
             logger.info(f"{start, end}")
@@ -94,8 +97,9 @@ def command_encode(args):
             )
 
             ids = tiktoken_enc.encode(chunk, allowed_special=allowed_special)
-            res.extend(ids)
+            np_arrays.append(np.array(ids, dtype=np.uint16))
 
+    res = np.concat(np_arrays)
     input_length = os.path.getsize(args.input_file)
     print(f"Encoding output length: {len(res)}")
     print(f"Input length: {input_length}")
@@ -103,7 +107,7 @@ def command_encode(args):
 
     # Save token IDs to file if output_file is provided
     if args.output_file:
-        np.save(args.output_file, np.array(res, dtype=np.uint16))
+        np.save(args.output_file, res)
         logger.info(f"Token IDs saved to {args.output_file}")
 
 
