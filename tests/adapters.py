@@ -7,14 +7,16 @@ from jaxtyping import Float, Int
 
 import numpy.typing as npt
 import torch
-from torch import Tensor
+from torch import Tensor, nn
 
 import sys
+
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(parent_dir)
 
 from src.bpe import train_bpe
 from src.tokenizer import Tokenizer
+from src.linear import Linear
 
 
 def run_linear(
@@ -36,7 +38,9 @@ def run_linear(
         Float[Tensor, "... d_out"]: The transformed output of your linear module.
     """
 
-    raise NotImplementedError
+    linear = Linear(d_in, d_out)
+    linear.load_state_dict({"W": weights})
+    return linear.forward(in_features)
 
 
 def run_embedding(
