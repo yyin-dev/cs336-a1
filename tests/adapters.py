@@ -19,6 +19,7 @@ from src.tokenizer import Tokenizer
 from src.linear import Linear
 from src.embedding import Embedding
 from src.rms_norm import RMSNorm
+from src.swiglu import SwiGLU
 
 
 def run_linear(
@@ -98,7 +99,12 @@ def run_swiglu(
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
-    raise NotImplementedError
+
+    swiglu = SwiGLU(d_model, d_ff)
+    swiglu.W1.data = w1_weight
+    swiglu.W2.data = w2_weight
+    swiglu.W3.data = w3_weight
+    return swiglu.forward(in_features)
 
 
 def run_scaled_dot_product_attention(
