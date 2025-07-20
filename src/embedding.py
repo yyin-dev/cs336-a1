@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from einops import einsum, rearrange
+from einops import rearrange
 
 
 class Embedding(nn.Module):
