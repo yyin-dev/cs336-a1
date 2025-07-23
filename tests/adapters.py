@@ -24,6 +24,7 @@ from src.rope import RotaryPositionalEmbedding
 from src.softmax import softmax
 from src.attention import scaled_dot_product_attention, MultiHeadSelfAttention
 from src.transformer_block import Transformer_block
+from src.transformer import Transformer
 
 
 def run_linear(
@@ -402,7 +403,25 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    transformer = Transformer(
+        vocab_size, num_heads, d_model, d_ff, rope_theta, context_length, num_layers
+    )
+    transformer.input_embedding.W.data = weights["token_embeddings.weight"]
+    for i in range(num_layers):
+        block: Transformer_block = transformer.transformer_blocks[i]  # type: ignore
+        block.mhsa.W_Q.data = weights[f"layers.{i}.attn.q_proj.weight"]
+        block.mhsa.W_K.data = weights[f"layers.{i}.attn.k_proj.weight"]
+        block.mhsa.W_V.data = weights[f"layers.{i}.attn.v_proj.weight"]
+        block.mhsa.W_O.data = weights[f"layers.{i}.attn.output_proj.weight"]
+        block.pre_mhsa_rmsnorm.W.data = weights[f"layers.{i}.ln1.weight"]
+        block.ffn.W1.data = weights[f"layers.{i}.ffn.w1.weight"]
+        block.ffn.W2.data = weights[f"layers.{i}.ffn.w2.weight"]
+        block.ffn.W3.data = weights[f"layers.{i}.ffn.w3.weight"]
+        block.pre_ffn_rmsnorm.W.data = weights[f"layers.{i}.ln2.weight"]
+
+    transformer.norm.W.data = weights["ln_final.weight"]
+    transformer.output_embedding.W.data = weights["lm_head.weight"]
+    return transformer(in_indices)
 
 
 def run_rmsnorm(
