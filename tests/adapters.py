@@ -23,6 +23,7 @@ from src.swiglu import SwiGLU
 from src.rope import RotaryPositionalEmbedding
 from src.softmax import softmax
 from src.attention import scaled_dot_product_attention, MultiHeadSelfAttention
+from src.transformer_block import Transformer_block
 
 
 def run_linear(
@@ -308,7 +309,18 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+    block = Transformer_block(d_model, num_heads, d_ff, theta, max_seq_len)
+    block.mhsa.W_Q.data = weights["attn.q_proj.weight"]
+    block.mhsa.W_K.data = weights["attn.k_proj.weight"]
+    block.mhsa.W_V.data = weights["attn.v_proj.weight"]
+    block.mhsa.W_O.data = weights["attn.output_proj.weight"]
+    block.pre_mhsa_rmsnorm.W.data = weights["ln1.weight"]
+    block.ffn.W1.data = weights["ffn.w1.weight"]
+    block.ffn.W2.data = weights["ffn.w2.weight"]
+    block.ffn.W3.data = weights["ffn.w3.weight"]
+    block.pre_ffn_rmsnorm.W.data = weights["ln2.weight"]
+
+    return block(in_features)
 
 
 def run_transformer_lm(
