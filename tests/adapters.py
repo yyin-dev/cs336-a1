@@ -22,7 +22,7 @@ from src.rms_norm import RMSNorm
 from src.swiglu import SwiGLU
 from src.rope import RotaryPositionalEmbedding
 from src.softmax import softmax
-from src.attention import scaled_dot_product_attention
+from src.attention import scaled_dot_product_attention, MultiHeadSelfAttention
 
 
 def run_linear(
@@ -162,7 +162,12 @@ def run_multihead_self_attention(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    mhsa = MultiHeadSelfAttention(d_model, num_heads)
+    mhsa.W_Q.data = q_proj_weight
+    mhsa.W_K.data = k_proj_weight
+    mhsa.W_V.data = v_proj_weight
+    mhsa.W_O.data = o_proj_weight
+    return mhsa.forward(in_features)
 
 
 def run_multihead_self_attention_with_rope(
@@ -202,7 +207,12 @@ def run_multihead_self_attention_with_rope(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    mhsa = MultiHeadSelfAttention(d_model, num_heads, theta, max_seq_len)
+    mhsa.W_Q.data = q_proj_weight
+    mhsa.W_K.data = k_proj_weight
+    mhsa.W_V.data = v_proj_weight
+    mhsa.W_O.data = o_proj_weight
+    return mhsa.forward(in_features)
 
 
 def run_rope(
