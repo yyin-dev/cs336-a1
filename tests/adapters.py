@@ -26,6 +26,7 @@ from src.attention import scaled_dot_product_attention, MultiHeadSelfAttention
 from src.transformer_block import Transformer_block
 from src.transformer import Transformer
 from src.cross_entropy import cross_entropy
+from src.adamw import AdamW
 
 
 def run_linear(
@@ -539,7 +540,7 @@ def get_adamw_cls() -> type[torch.optim.Optimizer]:
     """
     Returns a torch.optim.Optimizer that implements AdamW.
     """
-    raise NotImplementedError
+    return AdamW
 
 
 def run_get_lr_cosine_schedule(
