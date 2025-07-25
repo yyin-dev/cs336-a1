@@ -27,6 +27,7 @@ from src.transformer_block import Transformer_block
 from src.transformer import Transformer
 from src.cross_entropy import cross_entropy
 from src.adamw import AdamW
+from src.cosine_lr import cosine_lr_schedule_with_warmup
 
 
 def run_linear(
@@ -568,7 +569,9 @@ def run_get_lr_cosine_schedule(
     Returns:
         Learning rate at the given iteration under the specified schedule.
     """
-    raise NotImplementedError
+    return cosine_lr_schedule_with_warmup(
+        it, max_learning_rate, min_learning_rate, warmup_iters, cosine_cycle_iters
+    )
 
 
 def run_save_checkpoint(
