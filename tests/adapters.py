@@ -28,6 +28,7 @@ from src.transformer import Transformer
 from src.cross_entropy import cross_entropy
 from src.adamw import AdamW
 from src.cosine_lr import cosine_lr_schedule_with_warmup
+from src.gradient_clipping import clip_gradient
 
 
 def run_linear(
@@ -534,7 +535,7 @@ def run_gradient_clipping(
 
     The gradients of the parameters (parameter.grad) should be modified in-place.
     """
-    raise NotImplementedError
+    clip_gradient(parameters, max_l2_norm)
 
 
 def get_adamw_cls() -> type[torch.optim.Optimizer]:
