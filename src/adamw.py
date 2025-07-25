@@ -1,4 +1,4 @@
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from typing import Optional
 import torch
 import math
@@ -44,8 +44,8 @@ class AdamW(torch.optim.Optimizer):
                 g = p.grad
 
                 # Read state
-                m = state.get("m", torch.zeros(g.shape))
-                v = state.get("v", torch.zeros(g.shape))
+                m = state.get("m", torch.zeros_like(g))
+                v = state.get("v", torch.zeros_like(g))
                 t: int = state.get("t", 1)  # Starts at 1
 
                 m = betas[0] * m + (1 - betas[0]) * g
