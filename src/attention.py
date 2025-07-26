@@ -107,16 +107,17 @@ class MultiHeadSelfAttention(nn.Module):
         )
 
         # Apply RoPE to Q and K, if needed
+        device = x.device
         if self.apply_rope:
             # Because RoPEs encodes relative positions, we can start from 0
-            positions = torch.arange(0, seq_len)
+            positions = torch.arange(0, seq_len, device=device)
             Q_multi = self.rope(Q_multi, positions)
             K_multi = self.rope(K_multi, positions)
 
         # The mask should contain 1's in the lower diagonal (including the
         # diagonal) and zeros elsewhere. The diagonal is included because
         # a token can attend to itself.
-        mask = torch.tril(torch.ones(seq_len, seq_len)).bool()
+        mask = torch.tril(torch.ones((seq_len, seq_len), device=device)).bool()
 
         # (... num_heads seq_len d)
         multiheaded = scaled_dot_product_attention(Q_multi, K_multi, V_multi, mask)

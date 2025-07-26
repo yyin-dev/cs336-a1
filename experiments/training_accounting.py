@@ -60,3 +60,9 @@ gpt2_xl_max_batch_size = max_batch_size(
     gpu_mem_gb=80, n=1024, d=1600, L=48, V=50527, dtype_bytes=4
 )
 print(f"Max batch size for GPT2-XL:{gpt2_xl_max_batch_size}")
+
+# 80GB GPU, 1024 seq len, 1600 hidden dim, 48 layers, 50k vocab
+gpt2_xl_max_batch_size = max_batch_size(
+    gpu_mem_gb=16, n=256, d=512, L=4, V=10000, dtype_bytes=4
+)
+print(f"Max batch size for A1 small run:{gpt2_xl_max_batch_size}")

@@ -116,11 +116,12 @@ def train(
 
     # Sanity check
     for param in model.parameters():
-        assert param.device == device
+        assert param.device.type == device
 
     # TODO: verify dtype is right
-    train_dataset = np.memmap(train_filename, dtype=np.uint16, mode="r")
-    val_dataset = np.memmap(val_filename, dtype=np.uint16, mode="r")
+    # Uint16 is not supported on MPS
+    train_dataset = np.memmap(train_filename, mode="r")
+    val_dataset = np.memmap(val_filename, mode="r")
 
     model.train()
 
@@ -174,14 +175,13 @@ def train(
             logging.info(f"Val Perplexity: {val_perplexity.item():.4f}")
 
         wandb.log(wandb_data)
-        logging.info("================================")
 
         if (t + 1) % save_every_n_iterations == 0 and checkpoint_path:
             checkpoint_file = checkpoint_path.replace(".pt", f"_iter{t}.pt")
             save_checkpoint(model, opt, t, checkpoint_file)
             logging.info(f"Checkpoint saved to {checkpoint_file}")
 
-        # TODO: wandb logging
+        logging.info("================================")
 
     run.finish()
 
@@ -190,34 +190,34 @@ def main():
     parser = argparse.ArgumentParser()
 
     # Required
-    parser.add_argument("--training_filename", type=str, required=True)
+    parser.add_argument("--train_filename", type=str, required=True)
     parser.add_argument("--val_filename", type=str, required=True)
     parser.add_argument("--vocab_size", type=int, required=True)
 
     # Model params
-    parser.add_argument("--num_heads", type=int, default=8)
-    parser.add_argument("--d_model", type=int, default=512)
-    parser.add_argument("--d_ff", type=int, default=2048)
-    parser.add_argument("--context_length", type=int, default=128)
-    parser.add_argument("--num_layers", type=int, default=6)
+    parser.add_argument("--num_heads", type=int, required=True)
+    parser.add_argument("--d_model", type=int, required=True)
+    parser.add_argument("--d_ff", type=int, required=True)
+    parser.add_argument("--context_length", type=int, required=True)
+    parser.add_argument("--num_layers", type=int, required=True)
     parser.add_argument("--rope_theta", type=float, default=10000.0)
 
     # Training hyperparams
-    parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--num_iterations", type=int, default=10000)
+    parser.add_argument("--batch_size", type=int, required=True)
+    parser.add_argument("--num_iterations", type=int, required=True)
     parser.add_argument("--max_l2_norm", type=float, default=1.0)
 
     # Optimizer
     parser.add_argument("--lr_max", type=float, default=3e-4)
     parser.add_argument("--lr_min", type=float, default=1e-5)
-    parser.add_argument("--T_w", type=int, default=1000)
-    parser.add_argument("--T_c", type=int, default=10000)
+    parser.add_argument("--T_w", type=int, required=True)
+    parser.add_argument("--T_c", type=int, required=True)
     parser.add_argument("--betas", type=float, nargs=2, default=(0.9, 0.95))
     parser.add_argument("--eps", type=float, default=1e-8)
     parser.add_argument("--weight_decay", type=float, default=0.01)
 
     # Checkpointing
-    parser.add_argument("--checkpoint_path", type=str, default="checkpoint.pt")
+    parser.add_argument("--checkpoint_path", type=str, required=True)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--save_every_n_iterations", type=int, default=1)
 
@@ -225,9 +225,16 @@ def main():
     parser.add_argument("--wandb_run_name", type=str)
 
     # Device
-    parser.add_argument(
-        "--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu"
-    )
+    default_device = "cpu"
+    if torch.cuda.is_available():
+        logging.info("cuda available")
+        default_device = "cuda"
+    elif torch.backends.mps.is_available():
+        logging.info("mps available")
+        default_device = "mps"
+
+    logging.info(f"Default device: {default_device}")
+    parser.add_argument("--device", type=str, default=default_device)
 
     args = parser.parse_args()
 
