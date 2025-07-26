@@ -1,29 +1,36 @@
 import torch
+import einops
 
 
 def cross_entropy(logits: torch.Tensor, targets: torch.Tensor):
     """
     Args
-        logits: (b, vocab_size)
-        targets: (b, )
+        logits: (..., vocab_size)
+        targets: (..., )
 
     Returns
         avg loss
     """
 
-    # (b, 1)
+    # (..., 1)
     logits_max = torch.max(logits, dim=-1, keepdim=True).values
 
-    # (b, vocab_size)
+    # (..., vocab_size)
     logits_stable = logits - logits_max
 
-    # (b, vocab_size)
+    # (..., vocab_size)
     exp = torch.exp(logits_stable)
 
-    # (b, 1)
+    # (..., 1)
     exp_sum = torch.sum(exp, dim=-1, keepdim=True)
 
-    b = logits.shape[0]
-    target_logits = logits[torch.arange(0, b), targets]
+    # Gather target prob from [logits_stable]
+    # target_logits has shape (...,).
+    # target_logits[...] = the targets[...]-th value from logits_stable[...]
+    target_logits = torch.gather(
+        logits_stable,
+        dim=len(logits_stable.shape) - 1,
+        index=einops.rearrange(targets, "... (b d) -> ... b d", d=1).long(),
+    )
 
-    return torch.mean(logits_max - target_logits + torch.log(exp_sum))
+    return torch.mean(-target_logits + torch.log(exp_sum))
