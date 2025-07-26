@@ -45,7 +45,7 @@ PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s
 
 
 def pretokenize_chunk(input_path, start, end, special_tokens) -> dict[bytes, int]:
-    logger.info(f"Start pretokenizing chunk, {start}, {end}")
+    # logger.info(f"Start pretokenizing chunk, {start}, {end}")
     escaped_special_tokens = list(map(re.escape, special_tokens))
     special_tokens_regex = "|".join(escaped_special_tokens)
 
@@ -65,7 +65,7 @@ def pretokenize_chunk(input_path, start, end, special_tokens) -> dict[bytes, int
             pretoken_bytes: bytes = pretoken.encode("utf-8")
             pretoken_freq[pretoken_bytes] += 1
 
-    logger.info(f"Done pretokenizing chunk, {start}, {end}")
+    # logger.info(f"Done pretokenizing chunk, {start}, {end}")
     return pretoken_freq
 
 
@@ -324,7 +324,7 @@ def train_bpe(
         if selected_pair is None:
             break
 
-        print(f"Selected pair: {selected_pair}")
+        # print(f"Selected pair: {selected_pair}")
         new_vocab: bytes = selected_pair[0] + selected_pair[1]
 
         # Core logic of merging & incrementally updating counts.
