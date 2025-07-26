@@ -31,6 +31,7 @@ dependencies = [
 dev = [
     { name = "matplotlib" },
     { name = "tiktoken" },
+    { name = "wandb" },
 ]
 
 [package.metadata]
@@ -54,6 +55,7 @@ requires-dist = [
 dev = [
     { name = "matplotlib", specifier = ">=3.10.3" },
     { name = "tiktoken", specifier = ">=0.9.0" },
+    { name = "wandb", specifier = ">=0.21.0" },
 ]
 
 [[package]]

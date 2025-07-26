@@ -8,6 +8,7 @@ import argparse
 import numpy as np
 import random
 import torch
+import wandb
 from src.transformer import Transformer
 from src.adamw import AdamW
 from src.cross_entropy import cross_entropy
@@ -15,6 +16,7 @@ from src.data_loading import get_batch
 from src.gradient_clipping import clip_gradient
 from src.cosine_lr import cosine_lr_schedule_with_warmup
 from src.checkpointing import save_checkpoint, load_checkpoint
+from src.logger import logging
 
 # Seed for deterministic training
 seed = 42
@@ -47,7 +49,31 @@ def train(
     resume,
     save_every_n_iterations,
     device,
+    wandb_run_name,
 ):
+    run = wandb.init(
+        project="cs336-a1",
+        name=wandb_run_name,
+        config={
+            "vocab_size": vocab_size,
+            "num_heads": num_heads,
+            "d_model": d_model,
+            "d_ff": d_ff,
+            "rope_theta": rope_theta,
+            "context_length": context_length,
+            "num_layers": num_layers,
+            "lr_max": lr_max,
+            "lr_min": lr_min,
+            "T_w": T_w,
+            "T_c": T_c,
+            "batch_size": batch_size,
+            "weight_decay": weight_decay,
+            "max_l2_norm": max_l2_norm,
+            "betas": betas,
+            "eps": eps,
+        },
+    )
+
     # .to(device) moves all parameters and buffers to the device. It does so
     # by recursively traversing all parameters and buffers and call .to(device).
     # However, tensors created outside of nn.Parameter() or register_buffer()
@@ -77,7 +103,7 @@ def train(
     start_iter = 0
     if resume and os.path.exists(checkpoint_path):
         checkpoint_iter = load_checkpoint(checkpoint_path, model, opt)
-        print(f"Loaded from checkpoint at iteration {checkpoint_iter}")
+        logging.info(f"Loaded from checkpoint at iteration {checkpoint_iter}")
 
         start_iter = checkpoint_iter + 1
 
@@ -100,7 +126,7 @@ def train(
 
     for t in range(start_iter, num_iterations):
 
-        print(f"--- Starting iteration {t} ---")
+        logging.info(f"--- Starting iteration {t} ---")
 
         inputs, targets = get_batch(train_dataset, batch_size, context_length, device)
         opt.zero_grad()
@@ -115,10 +141,17 @@ def train(
 
         train_perplexity = torch.exp(train_loss)
 
-        print(f"Iteration {t} finished")
-        print(f"Train Loss: {train_loss.item():.4f}")
-        print(f"Train Perplexity: {train_perplexity.item():.4f}")
-        print(f"LR: {scheduler.get_last_lr()[0]:.6f}")
+        logging.info(f"Iteration {t} finished")
+        logging.info(f"Train Loss: {train_loss.item():.4f}")
+        logging.info(f"Train Perplexity: {train_perplexity.item():.4f}")
+        logging.info(f"LR: {scheduler.get_last_lr()[0]:.6f}")
+
+        wandb_data = {
+            "iteration": t,
+            "train/loss": train_loss.item(),
+            "train/perplexity": train_perplexity.item(),
+            "lr": scheduler.get_last_lr()[0],
+        }
 
         # Validation loss, after warmup
         if t >= T_w:
@@ -134,17 +167,23 @@ def train(
             # Revert to train mode
             model.train()
 
-            print(f"Val Loss: {val_loss.item():.4f}")
-            print(f"Val Perplexity: {val_perplexity.item():.4f}")
+            wandb_data["val/loss"] = val_loss.item()
+            wandb_data["val/perplexity"] = (val_perplexity.item(),)
 
-        print("================================")
+            logging.info(f"Val Loss: {val_loss.item():.4f}")
+            logging.info(f"Val Perplexity: {val_perplexity.item():.4f}")
+
+        wandb.log(wandb_data)
+        logging.info("================================")
 
         if (t + 1) % save_every_n_iterations == 0 and checkpoint_path:
             checkpoint_file = checkpoint_path.replace(".pt", f"_iter{t}.pt")
             save_checkpoint(model, opt, t, checkpoint_file)
-            print(f"Checkpoint saved to {checkpoint_file}")
+            logging.info(f"Checkpoint saved to {checkpoint_file}")
 
         # TODO: wandb logging
+
+    run.finish()
 
 
 def main():
@@ -182,6 +221,9 @@ def main():
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--save_every_n_iterations", type=int, default=1)
 
+    # Wandb naming
+    parser.add_argument("--wandb_run_name", type=str)
+
     # Device
     parser.add_argument(
         "--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu"
@@ -213,6 +255,7 @@ def main():
         resume=args.resume,
         save_every_n_iterations=args.save_every_n_iterations,
         device=args.device,
+        wandb_run_name=args.wandb_run_name,
     )
 
 
