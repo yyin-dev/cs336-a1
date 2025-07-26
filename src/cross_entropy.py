@@ -6,6 +6,9 @@ def cross_entropy(logits: torch.Tensor, targets: torch.Tensor):
     Args
         logits: (b, vocab_size)
         targets: (b, )
+
+    Returns
+        avg loss
     """
 
     # (b, 1)
