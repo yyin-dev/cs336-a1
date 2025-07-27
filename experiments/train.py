@@ -91,20 +91,8 @@ def train(
         num_layers,
     )
 
-    # Compile model for speedup
-    if device == "cpu":
-        model.compile()
-    elif device == "mps":
-        model.compile(backend="aot_eager")
-
     # Initialize opt with lr_max
     opt = AdamW(model.parameters(), lr_max, betas, eps, weight_decay)
-    # LambdaLR expects the function to return a ratio of the initial lr
-    # Return multiplier w.r.t lr_max
-    lr_lambda = lambda step: (
-        cosine_lr_schedule_with_warmup(step, lr_max, lr_min, T_w, T_c) / lr_max
-    )
-    scheduler = torch.optim.lr_scheduler.LambdaLR(opt, lr_lambda)
 
     # Load from checkpoint if needed
     start_iter = 0
@@ -113,6 +101,21 @@ def train(
         logging.info(f"Loaded from checkpoint at iteration {checkpoint_iter}")
 
         start_iter = checkpoint_iter + 1
+
+    # LambdaLR expects the function to return a ratio of the initial lr
+    # Return multiplier w.r.t lr_max
+    lr_lambda = lambda step: (
+        cosine_lr_schedule_with_warmup(step, lr_max, lr_min, T_w, T_c) / lr_max
+    )
+    scheduler = torch.optim.lr_scheduler.LambdaLR(
+        opt, lr_lambda, last_epoch=start_iter - 1
+    )
+
+    # Compile model for speedup
+    if device == "mps":
+        model.compile(backend="aot_eager")
+    else:
+        model.compile()
 
     # Move model and optimizer to device
     model = model.to(device)
