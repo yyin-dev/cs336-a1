@@ -7,6 +7,7 @@ sys.path.append(parent_dir)
 import argparse
 import numpy as np
 import random
+import math
 import torch
 import wandb
 from src.transformer import Transformer
@@ -115,6 +116,7 @@ def train(
     if device == "mps":
         model.compile(backend="aot_eager")
     else:
+        torch.set_float32_matmul_precision("high")
         model.compile()
 
     # Move model and optimizer to device
@@ -214,7 +216,7 @@ def main():
 
     # Training hyperparams
     parser.add_argument("--batch_size", type=int, required=True)
-    parser.add_argument("--num_iterations", type=int, required=True)
+    parser.add_argument("--total_tokens_processed", type=int, required=True)
     parser.add_argument("--max_l2_norm", type=float, default=1.0)
 
     # Optimizer
@@ -226,9 +228,9 @@ def main():
     # For lr_min: Usually 1e-5 or 0.1 * lr_max
     parser.add_argument("--lr_min", type=float, default=1e-5)
     # T_w usually 3%-6% of total steps.
-    parser.add_argument("--T_w", type=int, required=True)
+    parser.add_argument("--T_w", type=int)
     # T_c usually is the same as total steps
-    parser.add_argument("--T_c", type=int, required=True)
+    parser.add_argument("--T_c", type=int)
     # Betas common default: (0.9, 0.95)
     parser.add_argument("--betas", type=float, nargs=2, default=(0.9, 0.95))
     # Eps common default: 1e-8
@@ -264,6 +266,26 @@ def main():
             "--resume and --load_checkpoint_path must both be passed in or neither!"
         )
 
+    num_iterations = math.ceil(
+        int(args.total_tokens_processed)
+        / (int(args.context_length) * int(args.batch_size))
+    )
+    logging.info(
+        f"Total tokens processec: {args.total_tokens_processed:,}. Number of iterations to run: {num_iterations:,}"
+    )
+
+    if args.T_w:
+        T_w = args.T_w
+    else:
+        T_w = int(0.05 * num_iterations)
+        logging.info(f"Deriving T_w from num_iterations: {T_w}")
+
+    if args.T_c:
+        T_c = args.T_c
+    else:
+        T_c = num_iterations
+        logging.info(f"Deriving T_c from num_iterations: {T_c}")
+
     train(
         vocab_size=args.vocab_size,
         num_heads=args.num_heads,
@@ -277,11 +299,11 @@ def main():
         betas=tuple(args.betas),
         eps=args.eps,
         weight_decay=args.weight_decay,
-        T_w=args.T_w,
-        T_c=args.T_c,
+        T_w=T_w,
+        T_c=T_c,
         max_l2_norm=args.max_l2_norm,
         batch_size=args.batch_size,
-        num_iterations=args.num_iterations,
+        num_iterations=num_iterations,
         train_filename=args.train_filename,
         val_filename=args.val_filename,
         save_checkpoint_path=args.save_checkpoint_path,
