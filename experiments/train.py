@@ -45,8 +45,9 @@ def train(
     num_iterations,
     train_filename,
     val_filename,
-    checkpoint_path,
+    save_checkpoint_path: str,
     resume,
+    load_checkpoint_path: str,
     save_every_n_iterations,
     device,
     wandb_run_name,
@@ -90,6 +91,12 @@ def train(
         num_layers,
     )
 
+    # Compile model for speedup
+    if device == "cpu":
+        model.compile()
+    elif device == "mps":
+        model.compile(backend="aot_eager")
+
     # Initialize opt with lr_max
     opt = AdamW(model.parameters(), lr_max, betas, eps, weight_decay)
     # LambdaLR expects the function to return a ratio of the initial lr
@@ -101,8 +108,8 @@ def train(
 
     # Load from checkpoint if needed
     start_iter = 0
-    if resume and os.path.exists(checkpoint_path):
-        checkpoint_iter = load_checkpoint(checkpoint_path, model, opt)
+    if resume and os.path.exists(load_checkpoint_path):
+        checkpoint_iter = load_checkpoint(load_checkpoint_path, model, opt)
         logging.info(f"Loaded from checkpoint at iteration {checkpoint_iter}")
 
         start_iter = checkpoint_iter + 1
@@ -154,8 +161,8 @@ def train(
             "lr": scheduler.get_last_lr()[0],
         }
 
-        # Validation loss, after warmup
-        if t >= T_w:
+        # Validation loss
+        if (t + 1) % 10 == 0:
             model.eval()
             with torch.no_grad():
                 val_inputs, val_targets = get_batch(
@@ -169,15 +176,15 @@ def train(
             model.train()
 
             wandb_data["val/loss"] = val_loss.item()
-            wandb_data["val/perplexity"] = (val_perplexity.item(),)
+            wandb_data["val/perplexity"] = val_perplexity.item()
 
             logging.info(f"Val Loss: {val_loss.item():.4f}")
             logging.info(f"Val Perplexity: {val_perplexity.item():.4f}")
 
         wandb.log(wandb_data)
 
-        if (t + 1) % save_every_n_iterations == 0 and checkpoint_path:
-            checkpoint_file = checkpoint_path.replace(".pt", f"_iter{t}.pt")
+        if (t + 1) % save_every_n_iterations == 0 and save_checkpoint_path:
+            checkpoint_file = save_checkpoint_path.replace(".pt", f"_iter{t}.pt")
             save_checkpoint(model, opt, t, checkpoint_file)
             logging.info(f"Checkpoint saved to {checkpoint_file}")
 
@@ -208,17 +215,28 @@ def main():
     parser.add_argument("--max_l2_norm", type=float, default=1.0)
 
     # Optimizer
+    # For AdamW, some rough rules for lr_max:
+    # Small transformers (≤100M params): 3e-4 to 5e-4
+    # Medium (∼300M): 1e-4 to 3e-4
+    # Large (∼1B+): 2e-5 to 6e-5
     parser.add_argument("--lr_max", type=float, default=3e-4)
+    # For lr_min: Usually 1e-5 or 0.1 * lr_max
     parser.add_argument("--lr_min", type=float, default=1e-5)
+    # T_w usually 3%-6% of total steps.
     parser.add_argument("--T_w", type=int, required=True)
+    # T_c usually is the same as total steps
     parser.add_argument("--T_c", type=int, required=True)
+    # Betas common default: (0.9, 0.95)
     parser.add_argument("--betas", type=float, nargs=2, default=(0.9, 0.95))
+    # Eps common default: 1e-8
     parser.add_argument("--eps", type=float, default=1e-8)
+    # Weight decay common default: 0.01
     parser.add_argument("--weight_decay", type=float, default=0.01)
 
     # Checkpointing
-    parser.add_argument("--checkpoint_path", type=str, required=True)
+    parser.add_argument("--save_checkpoint_path", type=str, required=True)
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--load_checkpoint_path", type=str)
     parser.add_argument("--save_every_n_iterations", type=int, default=1)
 
     # Wandb naming
@@ -237,6 +255,11 @@ def main():
     parser.add_argument("--device", type=str, default=default_device)
 
     args = parser.parse_args()
+
+    if bool(args.resume) != bool(args.load_checkpoint_path):
+        raise ValueError(
+            "--resume and --load_checkpoint_path must both be passed in or neither!"
+        )
 
     train(
         vocab_size=args.vocab_size,
@@ -258,8 +281,9 @@ def main():
         num_iterations=args.num_iterations,
         train_filename=args.train_filename,
         val_filename=args.val_filename,
-        checkpoint_path=args.checkpoint_path,
+        save_checkpoint_path=args.save_checkpoint_path,
         resume=args.resume,
+        load_checkpoint_path=args.load_checkpoint_path,
         save_every_n_iterations=args.save_every_n_iterations,
         device=args.device,
         wandb_run_name=args.wandb_run_name,
