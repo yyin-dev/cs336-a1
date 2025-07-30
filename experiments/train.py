@@ -1,3 +1,25 @@
+"""
+Example command:
+uv run experiments/train.py \
+--train_filename ../a1-data/ts-train-encoded-tiktoken.npy \
+--val_filename ../a1-data/ts-valid-encoded-tiktoken.npy \
+--vocab_size 10000 \
+--num_heads 16 \
+--d_model 512 \
+--d_ff 1344 \
+--context_length 256 \
+--num_layers 4 \
+--rope_theta 10000 \
+--batch_size 64 \
+--save_every_n_iterations 100 \
+--total_tokens_processed 40_000_000 \
+--resume \
+--load_checkpoint_path ../a1-checkpoints/lr_max_1e-2_checkpoint_iter18999.pt \
+--save_checkpoint_path ../a1-checkpoints/checkpoint.pt \
+--wandb_run_name xxx \
+--wandb_proj_name yyy
+"""
+
 import os
 import sys
 
@@ -52,9 +74,10 @@ def train(
     save_every_n_iterations,
     device,
     wandb_run_name,
+    wandb_proj_name,
 ):
     run = wandb.init(
-        project="cs336-a1",
+        project=wandb_proj_name,
         name=wandb_run_name,
         config={
             "vocab_size": vocab_size,
@@ -245,7 +268,8 @@ def main():
     parser.add_argument("--save_every_n_iterations", type=int, default=1)
 
     # Wandb naming
-    parser.add_argument("--wandb_run_name", type=str)
+    parser.add_argument("--wandb_proj_name", type=str, required=True)
+    parser.add_argument("--wandb_run_name", type=str, required=True)
 
     # Device
     default_device = "cpu"
@@ -311,6 +335,7 @@ def main():
         load_checkpoint_path=args.load_checkpoint_path,
         save_every_n_iterations=args.save_every_n_iterations,
         device=args.device,
+        wandb_proj_name=args.wandb_proj_name,
         wandb_run_name=args.wandb_run_name,
     )
 

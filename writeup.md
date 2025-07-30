@@ -135,7 +135,7 @@ Performance comparison:
   * Tiktoken (single thread): 1.5 second
   * Compression ratio: 4.12
 * TS train:
-  * My tokenizer (multi-process): 35 min
+  * My tokenizer (multi-process): 4 min
   * Tiktoken (single thread): 3min
   * Compression ratio: 4.11
 * OWT valid:
@@ -287,8 +287,73 @@ $$
 b_{max} = ⌊ \frac{M−16(Vd+16 L d^2 )}{4 [L(20nd+2 n^2 )+2nd+n]}⌋
 $$
 
-
 With GPT2-XL and 80GB GPU memory, the max batch size is actually 1...
+
+## Problem (learning_rate)
+
+Batch size = 64. Learning rate sweep: 3e-4, 3e-3, 3e-2, 1e-2, 1e-1.
+
+![image-20250730114927647](https://raw.githubusercontent.com/yyin-dev/image_cloud/main/Picsee/image-20250730114927647_CoyUr1.jpeg)
+
+(a) Parameter search strategy: logarithmically because model performances are more sensitive to order of magnitude changes instead of small tweaks.
+
+* 1e-1: Too large and diverged
+* 3e-2: too large and caused problem at early stage of training?
+* 1e-2: works best
+* 3e-3:works very well
+* 3e-4: too small and doesn't learn fast enough
+
+(b) The learning rate that diverged (1e-1) is about 10x of the best learngin rate (1e-2).
+
+## Problem (batch_size_experiments)
+
+![image-20250730115447633](https://raw.githubusercontent.com/yyin-dev/image_cloud/main/Picsee/image-20250730115447633_XVHDUq.jpeg)
+
+Experimented batch size and learning rates:
+
+* batch size 32; lr 7e-3
+* batch size 64; lr 1e-2
+* batch size 128; lr 1.4e-2
+* batch size 128; lr 2e-2
+* batch size 256; lr 2e-2
+* batch size 512; lr 3e-2
+
+Findings:
+
+* It seems like batch size 64 / 128 worked best in this problem.
+
+* Learning rate should increase when batch size increases
+
+* However, the scaling may not be linear. For example, when increasing batch size from 64 to 128, increasing the lr by $$\sqrt{2}$$x seems to work better than increasing it by 2x. It seems that common experience is that 
+
+  * For large batch size (>= 512), $$ \text{new\_lr} = \text{base\_lr} \times \frac{\text{new\_batch\_size}}{\text{base\_batch\_size}} $$. 
+  * For small batch size (< 512), $$\text{new\_lr} = \text{base\_lr} \times \sqrt{\frac{\text{new\_batch\_size}}{\text{base\_batch\_size}}}$$
+
+  
+
+## Problem (generate)
+
+I still couldn't get the model to generate fluent text on TS. The model has obtained 1.4 validation loss, but the best I can do, after sweeping temperature and top-p threshold, is following:
+
+* Prompt: Once upon a time
+* Generation: judamond pictures lose shot candyrup benches Melissa thrown lighter sour JumpDaddy dot Lily stomachulpture salefortable Next boot gap flappedjam stopSqueaky cushions timer necklaces cleaner lonheart dent wouldizzie enormousasha twentyun palace SparkleSc taken� mate person mos7Ex ever waters zipp acce hairdress la palmcerard comm spearinnybbed Tomm
+
+The writeup seems to indicate that a validation loss of 1.4 on TS is enough to generate fluent text, and I think I have implemented the inference script correctly...
+
+Debugging: I have verified the following:
+
+* The model architecture is same during training and inference. So there shouldn't be an issue with loading checkpoints.
+* BPE vocab and merges are passed correctly during inference
+* Context length (initial prompt + max_generated_tokens) is never exceeded.
+* Tokenizer decoding process.
+* Decoding logic seems right.
+
+Observation: 
+
+* The inference output is more English-like with a higher temperature (>3), while garbage with a low temperature (<0.5). This means the model is overconfident but wrong, putting very high probabilities on bad tokens. 
+* I inspected the raw logits at each inference step, before temperature, top-p sampling or softmax is applied. The max logit is around 10, which is very overconfident. 
+
+Interpretation: This likely means this is a training problem rather than inferencing problem, the model hasn't learned to generate text effectively. ChatGPT says that low validation loss doesn't guarantee good generation quality. Model might generate poorly calibrated logits, and may have memorized poor shortcuts.
 
 ## Notes
 

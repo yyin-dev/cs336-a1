@@ -79,7 +79,7 @@ def command_encode(args):
             f, num_chunks, "<|endoftext|>".encode("utf-8")
         )
 
-    # Instead of keeping np.append after every chunk, keep np arrays in a list 
+    # Instead of keeping np.append after every chunk, keep np arrays in a list
     # and do np.concat at the end.
     # np.append is O(m+n) and copies both arrays into a new memory location.
     np_arrays: list[np.ndarray] = []

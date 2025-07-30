@@ -6,17 +6,19 @@ import torch
 from softmax import softmax
 from transformer import Transformer
 from tokenizer import Tokenizer
+from einops import rearrange
+import tiktoken
 
 
 def decode(
     model: Transformer,
-    prompt: torch.Tensor,
+    prompt: str,
     vocab: dict[int, bytes],
     merges: list[tuple[bytes, bytes]],
-    special_tokens: list[str] = ["<|endoftext|>"],
     max_generated_tokens: int = 1,
     temperature: float = 1.0,
     top_p_sampling_threshold: float = 1.0,
+    use_tiktoken: bool = True,
 ):
     """
     Stops at <|endoftext|> or max_generated_tokens.
@@ -25,30 +27,65 @@ def decode(
         prompt: (seq_len,) TODO: support batching
     """
 
-    generated_tokens: list[str] = []
+    generated_token_ids: list[int] = []
 
-    input = prompt
-    tokenizer = Tokenizer(vocab, merges, special_tokens)
-    while len(generated_tokens) < max_generated_tokens:
-        if generated_tokens and generated_tokens[-1] == "<|endoftext|>":
-            break
+    if use_tiktoken:
+        # Find [mergeable_ranks] and [special_tokens]
+        # vocab = [ 256 individual bytes; speical tokens; merges ]
+        mergeable_ranks: dict[bytes, int] = {pair: idx for (idx, pair) in vocab.items()}
+        num_special_tokens = len(vocab) - 256 - len(merges)
+        print(f"Number of special tokens: {num_special_tokens}. ")
+        special_tokens = []
+        for i in range(256, 256 + num_special_tokens):
+            special_tokens.append(vocab[i])
+        print(f"Special tokens: {special_tokens}")
+
+        special_tokens_dict = {
+            token.decode("utf-8"): idx + 256
+            for (idx, token) in enumerate(special_tokens)
+        }
+
+        allowed_special = set(list(map(lambda b: b.decode("utf-8"), special_tokens)))
+        tiktoken_enc = tiktoken.Encoding(
+            name="my_encoding",
+            pat_str=r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""",
+            mergeable_ranks=mergeable_ranks,
+            special_tokens=special_tokens_dict,
+        )
+
+        input = torch.tensor(
+            tiktoken_enc.encode(prompt, allowed_special=allowed_special)
+        )
+    else:
+        tokenizer = Tokenizer(vocab, merges, special_tokens=["<|endoftext|>"])
+        input = torch.tensor(tokenizer.encode(prompt))
+
+    # Add a dummy batch dimension
+    input = rearrange(input, "(b s) -> b s", b=1)
+
+    while len(generated_token_ids) < max_generated_tokens:
+        # TODO: break on endoftext
 
         output = model(input)
+        logits = output[0, -1]
+
+        # Inspect logits for debugging
+        logits_sorted = torch.sort(logits, descending=True)
+        print(f"Top logits: {logits_sorted[:20]}")
 
         # Temperature scaling (applied before softmax)
-        output /= temperature
+        logits /= temperature
 
-        # Extract the last logits only
-        logits = softmax(output, dim=-1)[-1]
+        probs = softmax(logits, dim=-1)
 
         # Top-p sampling
-        logits_sorted, indices = torch.sort(logits, descending=True)
-        assert len(vocab) == logits.shape[-1]
+        probs_sorted, indices = torch.sort(probs, descending=True)
+        assert len(vocab) == probs.shape[-1]
 
         p = len(vocab)  # Set to vocab size in case we never reach threshold
         accumulated_probability = 0
         for i in range(len(vocab)):
-            accumulated_probability += logits_sorted[i]
+            accumulated_probability += probs_sorted[i]
             if accumulated_probability >= top_p_sampling_threshold:
                 p = i
                 break
@@ -56,15 +93,29 @@ def decode(
         mask = torch.zeros((len(vocab),)).bool()
         top_p_indices = indices[: p + 1]
         for idx in top_p_indices:
-            mask[idx] = True
+            mask[int(idx)] = True
 
-        logits = torch.masked_fill(logits, ~mask, 0)
+        probs = torch.masked_fill(probs, ~mask, 0)
+        probs /= probs.sum()
 
         # Sample from probabilities
-        # Re-normalize with softmax
-        probs = softmax(logits, dim=-1)
-        selected_id = torch.multinomial(probs, 1).numpy()[0]
-        next_token = tokenizer.decode([selected_id])
+        selected_id = int(torch.multinomial(probs, 1).item())
 
-        generated_tokens.append(next_token)
-        input = torch.cat([input, torch.tensor([selected_id])])
+        generated_token_ids.append(selected_id)
+
+        # input: (b, s)
+        next_token_tensor = rearrange(
+            torch.tensor([selected_id], device=input.device), "(b s) -> b s", b=1, s=1
+        )
+        input = torch.cat([input, next_token_tensor], dim=1)
+
+    if use_tiktoken:
+        res = tiktoken_enc.decode(  # pyright: ignore[reportPossiblyUnboundVariable]
+            generated_token_ids
+        )
+    else:
+        res = tokenizer.decode(  # pyright: ignore[reportPossiblyUnboundVariable]
+            generated_token_ids
+        )
+
+    return res
