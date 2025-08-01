@@ -7,7 +7,7 @@ from einops import einsum
 class SwiGLU(nn.Module):
     def __init__(self, d_model, d_ff):
         super().__init__()
-        std = math.sqrt((d_model + d_ff) / 2)
+        std = math.sqrt(2 / (d_model + d_ff))
 
         w1_init = nn.init.trunc_normal_(
             torch.zeros(d_ff, d_model), mean=0, std=std, a=-3 * std, b=3 * std
