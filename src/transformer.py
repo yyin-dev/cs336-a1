@@ -4,7 +4,6 @@ from embedding import Embedding
 from transformer_block import Transformer_block
 from linear import Linear
 from rms_norm import RMSNorm
-from transformer_block import Transformer_block
 
 
 class Transformer(nn.Module):

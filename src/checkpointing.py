@@ -30,7 +30,8 @@ def load_checkpoint(
     """
     Returns: iteration number
     """
-    states = torch.load(src)
+    device = next(model.parameters()).device
+    states = torch.load(src, map_location=device)
     model.load_state_dict(states["model_state"])
     if optimizer:
         optimizer.load_state_dict(states["optimizer_state"])

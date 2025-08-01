@@ -53,9 +53,8 @@ def decode(
             special_tokens=special_tokens_dict,
         )
 
-        input = torch.tensor(
-            tiktoken_enc.encode(prompt, allowed_special=allowed_special)
-        )
+        prompt_tokens = tiktoken_enc.encode(prompt, allowed_special=allowed_special)
+        input = torch.tensor(prompt_tokens)
     else:
         tokenizer = Tokenizer(vocab, merges, special_tokens=["<|endoftext|>"])
         input = torch.tensor(tokenizer.encode(prompt))
@@ -68,10 +67,6 @@ def decode(
 
         output = model(input)
         logits = output[0, -1]
-
-        # Inspect logits for debugging
-        logits_sorted = torch.sort(logits, descending=True)
-        print(f"Top logits: {logits_sorted[:20]}")
 
         # Temperature scaling (applied before softmax)
         logits /= temperature
@@ -90,7 +85,7 @@ def decode(
                 p = i
                 break
 
-        mask = torch.zeros((len(vocab),)).bool()
+        mask = torch.zeros((len(vocab),), device=probs.device).bool()
         top_p_indices = indices[: p + 1]
         for idx in top_p_indices:
             mask[int(idx)] = True

@@ -79,6 +79,7 @@ def main():
         max_generated_tokens=args.max_generated_tokens,
         temperature=args.temperature,
         top_p_sampling_threshold=args.top_p_sampling_threshold,
+        use_tiktoken=False,
     )
 
     print(f"Generated:<{res}>")

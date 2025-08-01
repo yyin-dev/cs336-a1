@@ -333,6 +333,18 @@ Findings:
 
 ## Problem (generate)
 
+I wrote a critical bug in the training script: when loading data using [`np.memmap`](https://numpy.org/devdocs/reference/generated/numpy.memmap.html), I didn't specify the data type as `np.uint16` and it defaults to `np.uint8` *. 
+
+Claude Code did extensive debugging and investigation. See `DEBUGGING_CLAUDE.md` for prompts and `DEBUGGING.md` for a documentation of the debugging process. It's really impressive that Claude was able to write scripts to test its hypothesis and execute the process of elimination. The scripts are in the `claude` directory.
+
+*: Actually I add that initially, but when testing locally on MacOS's MPS, MPS doesn't support uint16, so I removed that argument `dtype=np.uint16`...
+
+
+
+---
+
+My writing before finding the bug:
+
 I still couldn't get the model to generate fluent text on TS. The model has obtained 1.4 validation loss, but the best I can do, after sweeping temperature and top-p threshold, is following:
 
 * Prompt: Once upon a time
