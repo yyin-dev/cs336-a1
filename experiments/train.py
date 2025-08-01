@@ -153,10 +153,9 @@ def train(
     for param in model.parameters():
         assert param.device.type == device
 
-    # TODO: verify dtype is right
-    # Uint16 is not supported on MPS
-    train_dataset = np.memmap(train_filename, mode="r")
-    val_dataset = np.memmap(val_filename, mode="r")
+    # Load as uint16 - the encoded data uses this dtype
+    train_dataset = np.memmap(train_filename, mode="r", dtype=np.uint16)
+    val_dataset = np.memmap(val_filename, mode="r", dtype=np.uint16)
 
     model.train()
 
