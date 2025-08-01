@@ -17,8 +17,10 @@ class Embedding(nn.Module):
             embedding_dim: dimension of the embedding vectors
         """
         super().__init__()
+        import math
+        std = 1 / math.sqrt(embedding_dim)
         init = torch.zeros((num_embeddings, embedding_dim))
-        init = nn.init.trunc_normal_(init, mean=0, std=1, a=-3, b=3)
+        init = nn.init.trunc_normal_(init, mean=0, std=std, a=-3*std, b=3*std)
         self.W = nn.Parameter(init)
 
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
